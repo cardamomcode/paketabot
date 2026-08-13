@@ -73,7 +73,7 @@ let tests =
                     assertThat versionMatch.Success isTrue
 
                     let version = versionMatch.Groups[1].Value
-                    let selfReference = $"uses: dbrattli/paketabot@v{version}"
+                    let selfReference = $"uses: cardamomcode/paketabot@v{version}"
                     assertThat (count selfReference workflow) (isEqualTo 2)
             )
         ]

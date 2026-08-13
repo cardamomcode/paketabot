@@ -74,12 +74,9 @@ release, and the cross-job artifact has one-day retention. A live smoke test is
 still required because repository Actions policies, token authorization, and
 GitHub API behavior are external to those tests.
 
-While the repository is private, explicitly grant Actions access to intended
-private test repositories under **Settings → Actions → General → Access**.
-Remove unintended access before a visibility change. When the repository
-becomes public, enable secret scanning, private vulnerability reporting, and
-the `main` branch rules listed in the threat model before announcing the
-release.
+Before announcing a production release, confirm secret scanning, push
+protection, private vulnerability reporting, and the `main` branch rules listed
+in the threat model remain enabled. Review any new secret-scanning alerts.
 
 Rotating a fine-grained token for the same GitHub login preserves the ownership
 record. Changing the login does not; follow the identity-change procedure in
