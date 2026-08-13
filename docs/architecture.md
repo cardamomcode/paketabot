@@ -56,7 +56,9 @@ were reviewed for that release.
 7. The publisher validates the artifact repository and SHA against its caller
    context and requires the event ref to be the default branch.
 8. It discovers prior state from the marked pull request created by the token
-   identity and publishes only `paket.lock` to `paketabot/weekly`.
+   identity and publishes only `paket.lock` to `paketabot/weekly`. A refresh
+   commit has the verified bot head and exact current base as parents, so it is
+   both a safe fast-forward and a lockfile-only diff against the latest base.
 9. For an open owned pull request, it updates pull-request metadata before a
    non-forced branch fast-forward, making the ref update the final API mutation.
 10. A lost API response is retried. If a new pull request was not created after

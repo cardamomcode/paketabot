@@ -325,6 +325,17 @@ let private branchTests =
                         (isEqualTo (Ok(Branches.FastForwardFrom "tracked")))
             )
             test (
+                "creates a refresh commit from the verified head and exact base",
+                fun _ ->
+                    assertThat
+                        (Branches.commitParents "base" (Branches.FastForwardFrom "tracked"))
+                        (isEqualTo [ "tracked"; "base" ])
+            )
+            test (
+                "creates a new publication commit directly from its exact base",
+                fun _ -> assertThat (Branches.commitParents "base" (Branches.CreateFrom "base")) (isEqualTo [ "base" ])
+            )
+            test (
                 "rejects an untracked existing branch",
                 fun _ ->
                     assertThat

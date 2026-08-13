@@ -6,7 +6,7 @@ type IGitHubGateway =
     abstract GetRepository: owner: string * name: string -> Async<Repository>
     abstract TryGetPublication: Repository -> Async<Publication option>
     abstract GetBranchHead: repository: Repository * branch: string -> Async<string option>
-    abstract CreateCommit: update: PublishUpdate * parentSha: string -> Async<string>
+    abstract CreateCommit: update: PublishUpdate * parentShas: string list -> Async<string>
     abstract CreateBranch: repository: Repository * branch: string * commitSha: string -> Async<unit>
     abstract FastForwardBranch: repository: Repository * branch: string * commitSha: string -> Async<unit>
     abstract CreatePullRequest: update: PublishUpdate -> Async<int>
@@ -158,12 +158,8 @@ type PublishService(github: IGitHubGateway) =
                         | Ok plan -> plan
                         | Error message -> invalidOp message
 
-                    let parentSha =
-                        match publicationPlan with
-                        | Branches.CreateFrom sha -> sha
-                        | Branches.FastForwardFrom sha -> sha
-
-                    let! commitSha = github.CreateCommit(publish, parentSha)
+                    let parentShas = Branches.commitParents baseSha publicationPlan
+                    let! commitSha = github.CreateCommit(publish, parentShas)
 
                     match publicationPlan, previousPublication with
                     | Branches.FastForwardFrom _, Some previous when previous.IsOpen ->

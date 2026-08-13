@@ -37,7 +37,7 @@ reusable workflow and passes only the named secret:
 ```yaml
 jobs:
   update:
-    uses: dbrattli/paketabot/.github/workflows/paketabot.yml@v0.1.1
+    uses: dbrattli/paketabot/.github/workflows/paketabot.yml@v0.1.2
     permissions:
       contents: read
     secrets:
@@ -48,7 +48,7 @@ The action repository is private during development. To test it from another
 private repository owned by the same account, grant repository Actions access
 under **Settings → Actions → General → Access**. Consumers use the exact
 immutable release shown above; do not reference `main` or a movable major tag.
-`v0.1.1` is the current private preview; `v0.1.0` remains its immutable initial
+`v0.1.2` is the current private preview; `v0.1.0` remains its immutable initial
 smoke-tested release. The production `v1.0.0` release remains reserved until
 every public-release requirement in the threat model is satisfied.
 
@@ -75,7 +75,8 @@ The publisher treats a marked pull request created by the identity behind
 `PAKETABOT_TOKEN` as durable branch state. It refuses to overwrite an existing
 branch without that ownership record, requires the branch ref to match the
 recorded pull-request head, and moves existing branches only through a
-non-forced fast-forward.
+non-forced fast-forward. Refresh commits also merge the exact current base so
+the pull request continues to contain only `paket.lock` after main advances.
 
 Rotating the token without changing its GitHub identity preserves this state.
 Future GitHub App support will provide the installation identity alongside a

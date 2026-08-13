@@ -8,7 +8,7 @@ remaining public-release requirement is satisfied.
 
 ## Release invariants
 
-- Consumers reference an exact release such as the private preview `v0.1.1` or
+- Consumers reference an exact release such as the private preview `v0.1.2` or
   production `v1.0.0`, never `main` or a movable major tag.
 - Both internal Action steps in the reusable workflow reference that same exact
   release.
