@@ -118,7 +118,7 @@ type private Resolver(result: ResolutionResult) =
 type private ThrowingResolver() =
     interface IPaketResolver with
         member _.Resolve() =
-            async { return failwith "resolution crashed" }
+            async { return failwith "resolution crashed with token=repository-secret" }
 
 let private repository = {
     Owner = "example"
@@ -158,7 +158,12 @@ let private resolveTests =
                     async {
                         let! result = ResolveService(ThrowingResolver()).Run()
                         assertThat result.Status (isEqualTo Failed)
-                        assertThat result.Messages (isEqualTo [ "resolution crashed" ])
+
+                        assertThat
+                            result.Messages
+                            (isEqualTo [ "Paket dependency resolution failed before producing a safe result." ])
+
+                        assertThat (result.Messages.Head.Contains("repository-secret")) isFalse
                     }
             )
         ]
@@ -281,7 +286,10 @@ let private publishTests =
                         let! outcome = PublishService(github).Run(repository, String.replicate 40 "a", updatedResult)
 
                         match outcome with
-                        | RunFailed [ message ] -> assertThat message (isEqualTo "pull request update failed")
+                        | RunFailed [ message ] ->
+                            assertThat
+                                message
+                                (isEqualTo "GitHub publication failed without exposing remote error details.")
                         | _ -> failwith "expected a failed publication"
 
                         assertThat github.CurrentHead (isEqualTo (Some previous.HeadSha))
