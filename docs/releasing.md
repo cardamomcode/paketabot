@@ -1,14 +1,15 @@
 # Releasing PaketaBot
 
 PaketaBot releases are security boundaries: a consumer grants the published
-workflow a repository-scoped token. Release only a reviewed commit after every
-remaining public-release requirement in the [threat model](threat-model.md) is
-satisfied.
+workflow a repository-scoped token. A private preview may be published only for
+controlled testing under the explicit limitations in the
+[threat model](threat-model.md). Publish a production release only after every
+remaining public-release requirement is satisfied.
 
 ## Release invariants
 
-- Consumers reference an exact release such as `v1.0.0`, never `main` or a
-  movable major tag.
+- Consumers reference an exact release such as the private preview `v0.1.0` or
+  production `v1.0.0`, never `main` or a movable major tag.
 - Both internal Action steps in the reusable workflow reference that same exact
   release.
 - Third-party Actions use reviewed full commit SHAs with a version comment for
@@ -38,10 +39,23 @@ satisfied.
    remove any exposed credential before changing repository visibility.
 6. Merge the reviewed release commit to `main` and wait for required CI.
 
+## Bootstrap the private preview
+
+The first reusable workflow cannot invoke its own Action until the exact tag in
+the workflow exists. After merging the reviewed `v0.1.0` references, create a
+draft release targeting that merge commit, mark it as a pre-release, verify the
+tag and bundle, and publish it. Do not move or replace the tag after
+publication.
+
+Run the private preview only in controlled repositories owned by this account.
+It is not a production release and does not remove any remaining public-release
+requirement. After those requirements are complete, repeat the reviewed process
+with exact `v1.0.0` self-references and publish the production release.
+
 ## Publish and verify
 
 1. Create a draft GitHub release whose tag and target are the reviewed release
-   commit.
+   commit. Mark `v0.1.0` as a pre-release; do not mark `v1.0.0` as a pre-release.
 2. Recheck the draft tag, generated bundle, workflow self-references, and
    release notes before publishing. Publication makes the release immutable.
 3. Run `workflow_dispatch` in a disposable repository containing an eligible
