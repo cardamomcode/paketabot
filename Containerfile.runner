@@ -1,4 +1,4 @@
-FROM node:24.13.0-bookworm-slim
+FROM node:26.7.0-bookworm-slim
 
 ARG DOTNET_VERSION=10.0.400
 ARG PAKET_VERSION=10.3.1
