@@ -31,7 +31,8 @@ jobs:
         id: resolve
         # decision: uses the release-specific immutable tag so this workflow invokes Action code from the same review
         # invariant: both operation steps in a released workflow reference that workflow's exact release tag
-        uses: dbrattli/paketabot@v1.0.0
+        # assumption: v0.1.0 is published before this workflow runs — GitHub cannot resolve an unpublished self-reference
+        uses: dbrattli/paketabot@v0.1.0
         with:
           operation: resolve
           paket-path: ${{ runner.temp }}/paket/paket
@@ -57,7 +58,7 @@ jobs:
           path: ${{ runner.temp }}/paketabot
       - name: Publish guarded dependency update
         # Keep synchronized with the resolve operation's immutable self-reference.
-        uses: dbrattli/paketabot@v1.0.0
+        uses: dbrattli/paketabot@v0.1.0
         with:
           operation: publish
           token: ${{ secrets.paketabot_token }}

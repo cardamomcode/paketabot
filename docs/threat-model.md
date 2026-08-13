@@ -56,8 +56,9 @@ identity.
 
 ## Required before a public release
 
-- Publish and smoke-test `v1.0.0` from the reviewed release commit. Confirm that
-  its reusable workflow invokes the same immutable tag in both jobs.
+- Publish and smoke-test the immutable private preview `v0.1.0` from its reviewed
+  release commit. Confirm that its reusable workflow invokes that same exact tag
+  in both jobs.
 - Add bounded diagnostic logging that reliably redacts tokens and repository
   secrets.
 - Exercise the resolver with malicious Paket files, oversized files, parser
@@ -75,6 +76,8 @@ identity.
   makes the feature available.
 - Enable GitHub secret scanning when repository visibility makes the feature
   available and review its findings before announcing the release.
+- After every other requirement is satisfied, publish `v1.0.0` from a reviewed
+  commit whose reusable workflow invokes that same exact production tag.
 
 The job boundary prevents repository content processed by Paket from sharing a
 runner with `PAKETABOT_TOKEN`. It does not sandbox Paket from the resolve job's
