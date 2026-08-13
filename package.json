@@ -1,6 +1,6 @@
 {
   "name": "paketabot",
-  "version": "0.1.3",
+  "version": "1.0.0",
   "private": true,
   "description": "The dependency bot that speaks Paket.",
   "type": "module",

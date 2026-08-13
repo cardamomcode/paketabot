@@ -86,6 +86,8 @@ identity.
 
 - The immutable private preview `v0.1.0` was published from its reviewed release
   commit and smoke-tested with its exact tag in both jobs.
+- The completed hardening was published as immutable preview `v0.1.3` and its
+  two-job resolver and publisher path was smoke-tested in a controlled consumer.
 - The source policy is exercised with credential-bearing files, oversized inputs,
   parser edge cases, redirect-shaped paths, DNS lookalikes, and
   metadata-derived Markdown. The application rejects or bounds these inputs
@@ -98,18 +100,13 @@ identity.
   and the GitHub App migration boundary is documented.
 - Reachable branches, tags, and closed pull-request heads were screened for
   credential signatures and private-key files before the visibility change.
+- The public repository requires the `check` status on `main`, prevents branch
+  deletion and force pushes, and has secret scanning, push protection, and
+  private vulnerability reporting enabled. The initial secret-scanning alert
+  review found no alerts.
 
 ## Required before the production release
 
-- Publish the completed hardening as a new immutable private preview and repeat
-  the two-job smoke test in a controlled consumer before changing visibility.
-- After changing the repository to public, require CI on `main` and prevent
-  branch deletion and force pushes. The current GitHub plan does not expose
-  repository rulesets while this repository remains private.
-- Enable GitHub private vulnerability reporting when repository visibility
-  makes the feature available.
-- Enable GitHub secret scanning when repository visibility makes the feature
-  available and review its findings before announcing the release.
 - After every other requirement is satisfied, publish `v1.0.0` from a reviewed
   commit whose reusable workflow invokes that same exact production tag.
 

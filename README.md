@@ -13,7 +13,7 @@ the workflow's two jobs.
 
 ## Status
 
-This repository contains a private, pre-release vertical slice. It includes a
+This repository contains the public PaketaBot workflow. It includes a
 credential-free resolver job, token-authenticated publisher job, guarded branch
 refresh, and Scriptorium test suite.
 
@@ -40,20 +40,17 @@ reusable workflow and passes only the named secret:
 ```yaml
 jobs:
   update:
-    uses: dbrattli/paketabot/.github/workflows/paketabot.yml@v0.1.3
+    uses: cardamomcode/paketabot/.github/workflows/paketabot.yml@v1.0.0
     permissions:
       contents: read
     secrets:
       paketabot_token: ${{ secrets.PAKETABOT_TOKEN }}
 ```
 
-The action repository is private during development. To test it from another
-private repository owned by the same account, grant repository Actions access
-under **Settings → Actions → General → Access**. Consumers use the exact
-immutable release shown above; do not reference `main` or a movable major tag.
-`v0.1.3` is the current private preview; `v0.1.0` remains its immutable initial
-smoke-tested release. The production `v1.0.0` release remains reserved until
-every public-release requirement in the threat model is satisfied.
+Consumers use the exact immutable release shown above; do not reference `main`
+or a movable major tag. The `v0.1.x` releases remain immutable previews used to
+exercise the complete workflow before the repository became public. The
+production `v1.0.0` tag is published only from its reviewed release commit.
 
 The example runs weekly and supports manual runs through `workflow_dispatch`.
 GitHub Actions concurrency prevents overlapping runs. PaketaBot refreshes only
