@@ -18,10 +18,10 @@ jobs:
     outputs:
       outcome: ${{ steps.resolve.outputs.outcome }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.400
       - name: Install Paket
@@ -34,7 +34,7 @@ jobs:
           paket-path: ${{ runner.temp }}/paket/paket
           result-path: ${{ runner.temp }}/paketabot/result.json
       - name: Upload typed resolution
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: paketabot-resolution
           path: ${{ runner.temp }}/paketabot/result.json
@@ -48,7 +48,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: paketabot-resolution
           path: ${{ runner.temp }}/paketabot
