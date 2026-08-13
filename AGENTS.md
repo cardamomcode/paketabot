@@ -1,8 +1,8 @@
 # Repository Guidelines
 
-PaketaBot is a repository-local GitHub Action written in F# and compiled by
-Fable to TypeScript for Node.js. Paket manages NuGet dependencies; pnpm manages
-npm dependencies.
+PaketaBot is a reusable, two-job GitHub Actions workflow written in F# and
+compiled by Fable to TypeScript for Node.js. Paket manages NuGet dependencies;
+pnpm manages npm dependencies.
 
 This repository uses Agent Decision Comments. See
 `AGENT_DECISION_COMMENTS.md` for the locally adopted convention, pinned to
@@ -30,8 +30,10 @@ committed. GitHub requires JavaScript Action dependencies to be packaged, so
 - Keep business rules and state transitions in `PaketaBot.Core`.
 - Keep npm interop in narrow binding modules; do not add hand-authored
   TypeScript application code.
-- Never pass `PAKETABOT_TOKEN`, checkout credentials, or future installation
-  tokens into the sandbox runner.
+- Never pass `PAKETABOT_TOKEN`, checkout credentials, Actions runtime
+  credentials, or future installation tokens into the Paket child process.
+- Keep dependency resolution and token-bearing publication in separate jobs;
+  the publisher must never check out or execute repository contents.
 - PaketaBot may update only its verified `paketabot/weekly` branch.
 - V1 accepts only public NuGet.org sources.
 

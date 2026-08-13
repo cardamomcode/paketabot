@@ -1,21 +1,25 @@
-name: PaketaBot
-description: Update Paket dependencies and refresh one guarded pull request.
+name: PaketaBot operation
+description: Resolve or publish one guarded Paket dependency update.
 
 inputs:
-  token:
-    description: Token used only by the host publisher to create the branch and pull request.
+  operation:
+    description: Either resolve in the credential-free job or publish in the token-bearing job.
     required: true
-  container-runtime:
-    description: OCI runtime used for the credential-free Paket runner.
+  token:
+    description: Publisher token; required for publish and forbidden for resolve.
     required: false
-    default: docker
-  runner-image:
-    description: Optional prebuilt runner image; the bundled image is built when omitted.
+  result-path:
+    description: Path to the typed resolution artifact exchanged between jobs.
     required: false
+    default: .paketabot/result.json
+  paket-path:
+    description: Paket executable used only by the resolve operation.
+    required: false
+    default: paket
 
 outputs:
   outcome:
-    description: One of published, unchanged, or failed.
+    description: One of updated, published, unchanged, or failed.
   pull-request-number:
     description: Pull request number when outcome is published.
 

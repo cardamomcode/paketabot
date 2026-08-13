@@ -4,8 +4,9 @@ open Fable.TypedJson.JS.Json
 
 module Serialization =
     // decision: codecs are constructed once per process because TypedJson plans are reusable and non-trivial to build
-    let runnerResult = auto<RunnerResult> ()
+    let resolutionArtifact = auto<ResolutionArtifact> ()
 
-    let encodeResult value = runnerResult.encode value
+    let encodeArtifact value = resolutionArtifact.encode value
 
-    let decodeResult json = runnerResult.decode (parseRaw json)
+    let decodeArtifact json =
+        resolutionArtifact.decode (parseRaw json)

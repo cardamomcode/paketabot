@@ -10,9 +10,8 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Bindings.fs" />
-    <Compile Include="Artifacts.fs" />
+    <Compile Include="Paket.fs" />
     <Compile Include="GitHub.fs" />
-    <Compile Include="Runners.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <Import Project="..\..\.paket\Paket.Restore.targets" />

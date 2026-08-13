@@ -1,0 +1,60 @@
+name: PaketaBot reusable workflow
+
+on:
+  workflow_call:
+    secrets:
+      paketabot_token:
+        description: Fine-grained token used only by the publish job.
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      outcome: ${{ steps.resolve.outputs.outcome }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.400
+      - name: Install Paket
+        run: dotnet tool install --tool-path "$RUNNER_TEMP/paket" Paket --version 10.3.1
+      - name: Resolve dependencies without publisher credentials
+        id: resolve
+        uses: dbrattli/paketabot@main
+        with:
+          operation: resolve
+          paket-path: ${{ runner.temp }}/paket/paket
+          result-path: ${{ runner.temp }}/paketabot/result.json
+      - name: Upload typed resolution
+        uses: actions/upload-artifact@v4
+        with:
+          name: paketabot-resolution
+          path: ${{ runner.temp }}/paketabot/result.json
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: resolve
+    if: needs.resolve.outputs.outcome == 'updated'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: paketabot-resolution
+          path: ${{ runner.temp }}/paketabot
+      - name: Publish guarded dependency update
+        uses: dbrattli/paketabot@main
+        with:
+          operation: publish
+          token: ${{ secrets.paketabot_token }}
+          result-path: ${{ runner.temp }}/paketabot/result.json

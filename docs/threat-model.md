@@ -1,34 +1,33 @@
 # Threat Model
 
-PaketaBot processes repository contents and downloaded packages as untrusted
-input. Running inside the repository's own workflow reduces cross-tenant risk,
-but it does not make dependency content trustworthy.
+PaketaBot processes repository contents and downloaded package metadata as
+untrusted input. Running inside the repository's own workflow reduces
+cross-tenant risk, but it does not make dependency content trustworthy.
 
 ## Protected assets
 
 - `PAKETABOT_TOKEN` and future GitHub App installation tokens
-- Checkout credentials
-- GitHub-hosted or self-hosted runner
+- GitHub Actions runtime credentials
+- GitHub-hosted or self-hosted runners
 - Pull-request and branch integrity
 - Other repositories accessible to an overly broad token
 
 ## Enforced in this vertical slice
 
-- The host Action requires an explicitly supplied token; there is no implicit
-  secret or known fallback.
-- The checkout must be the event's exact default-branch revision; manual runs
-  from another ref are rejected.
-- `git archive` includes only tracked files at the exact checkout SHA and omits
-  `.git`, so persisted checkout credentials cannot enter the worker archive.
-- The worker container receives archives, never GitHub credentials or
-  environment variables from the Action host.
-- The image supplies Paket; repository tool manifests are not executed.
+- The reusable workflow maps only the named `paketabot_token` secret; it does
+  not inherit all caller secrets.
+- The resolve and publish operations run as separate jobs on fresh runners.
+- The resolve job never receives `PAKETABOT_TOKEN`; runtime validation rejects
+  a publisher token if one is supplied accidentally.
+- Paket receives an allowlisted environment containing only non-secret process
+  settings, so Actions runtime and GitHub credentials are not inherited.
+- The publisher never checks out or executes repository contents.
+- The artifact carries the caller repository and exact event SHA; the publisher
+  rejects mismatches and non-default-branch refs before using the token.
 - Only root Paket files using public HTTPS NuGet.org sources are eligible.
 - Git, GitHub, HTTP-file, local-path, cache, credential, and alternative-source
   directives are rejected.
-- Container execution requests a read-only root filesystem, dropped
-  capabilities, no privilege escalation, resource limits, and narrow mounts.
-- Publishing accepts only `paketabot/weekly` and only the `paket.lock` path.
+- Publishing accepts only `paketabot/weekly` and only the root `paket.lock`.
 - An existing branch is trusted only when a marked pull request created by the
   authenticated token identity records the same head; an untracked or
   mismatched head is rejected.
@@ -47,23 +46,28 @@ identity.
 
 ## Required before a public release
 
-- Publish and pin a versioned runner image so consumers do not build it from a
-  moving source tree on every run.
-- Enforce network egress at infrastructure level, allowing only required
-  NuGet.org endpoints and blocking private/reserved address ranges after every
-  DNS resolution and redirect.
+- Publish immutable releases and hardcode the same immutable Action version in
+  each released reusable workflow; the private pre-release currently references
+  `main` internally.
+- Pin third-party Actions by immutable commit SHA.
 - Make branch mutation and pull-request mutation recoverable across partial
   GitHub API failures.
-- Define an explicit recovery procedure when the publisher identity changes or
-  the ownership pull request is edited or deleted.
 - Add bounded diagnostic logging that reliably redacts tokens and repository
   secrets.
-- Exercise the runner with malicious archives, symlinks, decompression bombs,
-  oversized files, Paket parser edge cases, and compromised package content.
-- Document and test private-action sharing, immutable release references, token
-  rotation, and the GitHub App migration path.
+- Exercise the resolver with malicious Paket files, oversized files, parser
+  edge cases, redirects, DNS rebinding attempts, and compromised package
+  metadata.
+- Evaluate infrastructure-enforced network egress controls if the source policy
+  and `paket update --no-install` boundary prove insufficient against Paket or
+  NuGet client vulnerabilities.
+- Document and test private-workflow sharing, token rotation, artifact retention,
+  and the GitHub App migration path.
+- Define an explicit recovery procedure when the publisher identity changes or
+  the ownership pull request is edited or deleted.
 
-The local container command is a development approximation. It does not by
-itself provide a sufficient boundary for executing arbitrary hostile code, and
-the Action remains intentionally limited to `paket update --no-install` on the
-narrow source policy above.
+The job boundary prevents repository content processed by Paket from sharing a
+runner with `PAKETABOT_TOKEN`. It does not sandbox Paket from the resolve job's
+runner or network, and GitHub's built-in job token exists within the Actions
+runtime even though it is not passed to the Paket child process. The workflow
+remains intentionally limited to `paket update --no-install` on the narrow
+source policy above.

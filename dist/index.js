@@ -25,17 +25,16 @@ import require$$1$2 from 'node:zlib';
 import require$$5$1 from 'node:perf_hooks';
 import require$$8$1 from 'node:util/types';
 import require$$1$1 from 'node:worker_threads';
-import require$$1$3, { fileURLToPath } from 'node:url';
+import require$$1$3 from 'node:url';
 import require$$5$2 from 'node:async_hooks';
 import require$$1$4 from 'node:console';
 import require$$1$5 from 'node:dns';
 import require$$5$3 from 'string_decoder';
 import 'child_process';
 import 'timers';
-import { join as join$1, dirname } from 'node:path';
-import { mkdir as mkdir$2, mkdtemp, readFile, rm as rm$1 } from 'node:fs/promises';
+import { mkdir as mkdir$2, readFile, writeFile as writeFile$1 } from 'node:fs/promises';
 import { execFile as execFile$1 } from 'node:child_process';
-import { tmpdir } from 'node:os';
+import { join as join$1, dirname } from 'node:path';
 
 // We use any as a valid input type
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -28432,14 +28431,14 @@ function setOutput(name, value) {
  */
 function setFailed(message) {
     process.exitCode = ExitCode.Failure;
-    error(message);
+    error$1(message);
 }
 /**
  * Adds an error issue
  * @param message error issue message. Errors will be converted to string via toString()
  * @param properties optional properties to add to the annotation.
  */
-function error(message, properties = {}) {
+function error$1(message, properties = {}) {
     issueCommand('error', toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
 /**
@@ -30660,6 +30659,10 @@ function escape(str) {
     //  as invalid, so we escape them too for compatibility.
     return str.replace(/[$()*+.?[\\\^{|}\]]/g, "\\$&");
 }
+function match(reg, input, startAt = 0) {
+    reg.lastIndex = startAt;
+    return reg.exec(input);
+}
 
 const fsFormatRegExp = /(^|[^%])%([0+\- ]*)(\*|\d+)?(?:\.(\d+))?(\w)/g;
 const formatRegExp = /\{(\d+)(,-?\d+)?(?:\:([a-zA-Z])(\d{0,2})|\:(.+?))?\}/g;
@@ -30715,9 +30718,20 @@ function compare(...args) {
         default: throw new Exception("String.compare: Unsupported number of parameters");
     }
 }
+function startsWith(str, pattern, ic) {
+    if (str.length >= pattern.length) {
+        return cmp(str.slice(0, pattern.length), pattern, ic) === 0;
+    }
+    return false;
+}
 function contains$1(str, pattern, ic) {
     { // fast path
         return str.includes(pattern);
+    }
+}
+function indexOf(str, searchValue, comparison, startIndex = 0) {
+    { // fast path
+        return str.indexOf(searchValue, startIndex);
     }
 }
 function printf(input) {
@@ -31517,10 +31531,15 @@ function map$2(f, source, cons) {
     }
     return target;
 }
+function singleton$3(value, cons) {
+    const ar = Helpers_allocateArrayFromCons(cons, 1);
+    setItem(ar, 0, value);
+    return ar;
+}
 function tryFind$1(predicate, array) {
     return array.find(predicate);
 }
-function choose(chooser, array, cons) {
+function choose$2(chooser, array, cons) {
     const res = [];
     for (let i = 0; i <= (array.length - 1); i++) {
         const matchValue = chooser(item(i, array));
@@ -31532,6 +31551,10 @@ function choose(chooser, array, cons) {
     {
         return res;
     }
+}
+function fold$3(folder, state, array) {
+    const folder_1 = folder;
+    return array.reduce((folder_1), state);
 }
 function sortBy(projection, xs, comparer) {
     const xs_1 = xs.slice();
@@ -31586,219 +31609,6 @@ function setItem(array, index, value) {
         array[index] = value;
     }
 }
-
-class CancellationToken {
-    _id;
-    _cancelled;
-    _listeners;
-    constructor(cancelled = false) {
-        this._id = 0;
-        this._cancelled = cancelled;
-        this._listeners = new Map();
-    }
-    get isCancelled() {
-        return this._cancelled;
-    }
-    cancel() {
-        if (!this._cancelled) {
-            this._cancelled = true;
-            for (const [, listener] of this._listeners) {
-                listener();
-            }
-        }
-    }
-    addListener(f) {
-        const id = this._id;
-        this._listeners.set(this._id++, f);
-        return id;
-    }
-    removeListener(id) {
-        return this._listeners.delete(id);
-    }
-    register(f, state) {
-        const $ = this;
-        const id = this.addListener(state == null ? f : () => f(state));
-        return { Dispose() { $.removeListener(id); } };
-    }
-    Dispose() {
-        // Implement IDisposable for compatibility but do nothing
-        // According to docs, calling Dispose does not trigger cancellation
-        // https://docs.microsoft.com/en-us/dotnet/api/system.threading.cancellationtokensource.dispose?view=net-6.0
-    }
-}
-class OperationCanceledException extends Exception {
-    constructor(msg) {
-        super(msg ?? "The operation was canceled");
-        // Object.setPrototypeOf(this, OperationCanceledException.prototype);
-    }
-}
-class Trampoline {
-    static get maxTrampolineCallCount() {
-        return 2000;
-    }
-    callCount;
-    // Set once a terminal continuation of the computation has been entered.
-    // After that point any exception unwinding through protectedCont comes from
-    // user continuation code, not the workflow body, and must propagate instead
-    // of being routed to onError (which would resolve the computation twice).
-    completed;
-    constructor() {
-        this.callCount = 0;
-        this.completed = false;
-    }
-    incrementAndCheck() {
-        return this.callCount++ > Trampoline.maxTrampolineCallCount;
-    }
-    hijack(f) {
-        this.callCount = 0;
-        setTimeout(f, 0);
-    }
-}
-function protectedCont(f) {
-    return (ctx) => {
-        if (ctx.cancelToken.isCancelled) {
-            ctx.onCancel(new OperationCanceledException());
-        }
-        else if (ctx.trampoline.incrementAndCheck()) {
-            ctx.trampoline.hijack(() => {
-                try {
-                    f(ctx);
-                }
-                catch (err) {
-                    if (ctx.trampoline.completed) {
-                        throw err;
-                    }
-                    ctx.onError(ensureErrorOrException(err));
-                }
-            });
-        }
-        else {
-            try {
-                f(ctx);
-            }
-            catch (err) {
-                // Once a terminal continuation has run the computation is complete, so
-                // an exception from user continuation code must propagate rather than be
-                // routed to onError (which would resolve the computation a second time,
-                // e.g. a succeeded try/with body re-entering its with handler).
-                if (ctx.trampoline.completed) {
-                    throw err;
-                }
-                ctx.onError(ensureErrorOrException(err));
-            }
-        }
-    };
-}
-function protectedBind(computation, binder) {
-    return protectedCont((ctx) => {
-        computation({
-            onSuccess: (x) => {
-                // Only guard the binder evaluation itself: the resulting computation
-                // is protected on its own, and re-catching what it throws would
-                // route continuation exceptions back into onError (double-resolve).
-                let bound;
-                try {
-                    bound = binder(x);
-                }
-                catch (err) {
-                    ctx.onError(ensureErrorOrException(err));
-                    return;
-                }
-                bound(ctx);
-            },
-            onError: ctx.onError,
-            onCancel: ctx.onCancel,
-            cancelToken: ctx.cancelToken,
-            trampoline: ctx.trampoline,
-        });
-    });
-}
-function protectedReturn(value) {
-    return protectedCont((ctx) => ctx.onSuccess(value));
-}
-class AsyncBuilder {
-    Bind(computation, binder) {
-        return protectedBind(computation, binder);
-    }
-    Combine(computation1, computation2) {
-        return this.Bind(computation1, () => computation2);
-    }
-    Delay(generator) {
-        return protectedCont((ctx) => generator()(ctx));
-    }
-    For(sequence, body) {
-        const iter = sequence[Symbol.iterator]();
-        let cur = iter.next();
-        return this.While(() => !cur.done, this.Delay(() => {
-            const res = body(cur.value);
-            cur = iter.next();
-            return res;
-        }));
-    }
-    Return(value) {
-        return protectedReturn(value);
-    }
-    ReturnFrom(computation) {
-        return computation;
-    }
-    TryFinally(computation, compensation) {
-        return protectedCont((ctx) => {
-            computation({
-                onSuccess: (x) => {
-                    compensation();
-                    ctx.onSuccess(x);
-                },
-                onError: (x) => {
-                    compensation();
-                    ctx.onError(x);
-                },
-                onCancel: (x) => {
-                    compensation();
-                    ctx.onCancel(x);
-                },
-                cancelToken: ctx.cancelToken,
-                trampoline: ctx.trampoline,
-            });
-        });
-    }
-    TryWith(computation, catchHandler) {
-        return protectedCont((ctx) => {
-            computation({
-                onSuccess: ctx.onSuccess,
-                onCancel: ctx.onCancel,
-                cancelToken: ctx.cancelToken,
-                trampoline: ctx.trampoline,
-                onError: (ex) => {
-                    // See protectedBind: only guard the handler evaluation itself.
-                    let handled;
-                    try {
-                        handled = catchHandler(ex);
-                    }
-                    catch (err) {
-                        ctx.onError(ensureErrorOrException(err));
-                        return;
-                    }
-                    handled(ctx);
-                },
-            });
-        });
-    }
-    Using(resource, binder) {
-        return this.TryFinally(binder(resource), () => resource.Dispose());
-    }
-    While(guard, computation) {
-        if (guard()) {
-            return this.Bind(computation, () => this.While(guard, computation));
-        }
-        else {
-            return this.Return(void 0);
-        }
-    }
-    Zero() {
-        return protectedCont((ctx) => ctx.onSuccess(void 0));
-    }
-}
-const singleton$1 = new AsyncBuilder();
 
 const SR_enumerationAlreadyFinished = "Enumeration already finished.";
 const SR_enumerationNotStarted = "Enumeration has not started. Call MoveNext.";
@@ -32043,7 +31853,7 @@ function Enumerator_generateWhileSome(openf, compute, closef) {
 function mkSeq(f) {
     return Enumerator_Seq_$ctor_673A07F2(f);
 }
-function ofSeq$1(xs) {
+function ofSeq$2(xs) {
     return getEnumerator(Operators_NullArgCheck("source", xs));
 }
 function delay(generator) {
@@ -32055,7 +31865,10 @@ function concat(sources) {
 function empty$2() {
     return delay(() => (new Array(0)));
 }
-function toList(xs) {
+function singleton$2(x) {
+    return delay(() => singleton$3(x));
+}
+function toList$1(xs) {
     if (isArrayLike(xs)) {
         return ofArray$1(xs);
     }
@@ -32063,16 +31876,30 @@ function toList(xs) {
         return xs;
     }
     else {
-        return ofSeq(xs);
+        return ofSeq$1(xs);
     }
 }
 function generate(create, compute, dispose) {
     return mkSeq(() => Enumerator_generateWhileSome(create, compute, dispose));
 }
+function append$1(xs, ys) {
+    return concat([xs, ys]);
+}
+function choose$1(chooser, xs) {
+    return generate(() => ofSeq$2(xs), (e) => {
+        let curr = undefined;
+        while ((curr == null) && e["System.Collections.IEnumerator.MoveNext"]()) {
+            curr = chooser(e["System.Collections.Generic.IEnumerator`1.get_Current"]());
+        }
+        return curr;
+    }, (e_1) => {
+        disposeSafe(e_1);
+    });
+}
 function compareWith(comparer, xs, ys) {
-    const e1 = ofSeq$1(xs);
+    const e1 = ofSeq$2(xs);
     try {
-        const e2 = ofSeq$1(ys);
+        const e2 = ofSeq$2(ys);
         try {
             let c = 0;
             let b1 = e1["System.Collections.IEnumerator.MoveNext"]();
@@ -32094,8 +31921,18 @@ function compareWith(comparer, xs, ys) {
         disposeSafe(e1);
     }
 }
-function exists(predicate, xs) {
-    const e = ofSeq$1(xs);
+function filter(f, xs) {
+    return choose$1((x) => {
+        if (f(x)) {
+            return some(x);
+        }
+        else {
+            return undefined;
+        }
+    }, xs);
+}
+function exists$1(predicate, xs) {
+    const e = ofSeq$2(xs);
     try {
         let found = false;
         while (!found && e["System.Collections.IEnumerator.MoveNext"]()) {
@@ -32108,7 +31945,7 @@ function exists(predicate, xs) {
     }
 }
 function fold$2(folder, state, xs) {
-    const e = ofSeq$1(xs);
+    const e = ofSeq$2(xs);
     try {
         let acc = state;
         while (e["System.Collections.IEnumerator.MoveNext"]()) {
@@ -32125,8 +31962,14 @@ function iterate(action, xs) {
         action(x);
     }, undefined, xs);
 }
+function iterateIndexed(action, xs) {
+    fold$2((i, x) => {
+        action(i, x);
+        return (i + 1) | 0;
+    }, 0, xs);
+}
 function map$1(mapping, xs) {
-    return generate(() => ofSeq$1(xs), (e) => (e["System.Collections.IEnumerator.MoveNext"]() ? some(mapping(e["System.Collections.Generic.IEnumerator`1.get_Current"]())) : undefined), (e_1) => {
+    return generate(() => ofSeq$2(xs), (e) => (e["System.Collections.IEnumerator.MoveNext"]() ? some(mapping(e["System.Collections.Generic.IEnumerator`1.get_Current"]())) : undefined), (e_1) => {
         disposeSafe(e_1);
     });
 }
@@ -32388,7 +32231,7 @@ function empty$1() {
 function cons(x, xs) {
     return FSharpList_Cons_305B8EAC(x, xs);
 }
-function singleton(x) {
+function singleton$1(x) {
     return FSharpList_Cons_305B8EAC(x, FSharpList_get_Empty());
 }
 function isEmpty(xs) {
@@ -32440,7 +32283,7 @@ function ofArrayWithTail(xs, tail_1) {
 function ofArray$1(xs) {
     return ofArrayWithTail(xs, FSharpList_get_Empty());
 }
-function ofSeq(xs) {
+function ofSeq$1(xs) {
     if (isArrayLike(xs)) {
         return ofArray$1(xs);
     }
@@ -32500,8 +32343,398 @@ function tryFindIndex(f, xs) {
     };
     return loop(0, xs);
 }
+function choose(f, xs) {
+    const root = FSharpList_get_Empty();
+    const node = fold$1((acc, x) => {
+        const matchValue = f(x);
+        if (matchValue == null) {
+            return acc;
+        }
+        else {
+            const t = new FSharpList(value(matchValue), undefined);
+            acc.tail = t;
+            return t;
+        }
+    }, root, xs);
+    const t_2 = FSharpList_get_Empty();
+    node.tail = t_2;
+    return FSharpList__get_Tail(root);
+}
 function contains(value, xs, eq) {
     return tryFindIndex((v) => eq.Equals(value, v), xs) != null;
+}
+function exists(f, xs) {
+    return tryFindIndex(f, xs) != null;
+}
+
+class CancellationToken {
+    _id;
+    _cancelled;
+    _listeners;
+    constructor(cancelled = false) {
+        this._id = 0;
+        this._cancelled = cancelled;
+        this._listeners = new Map();
+    }
+    get isCancelled() {
+        return this._cancelled;
+    }
+    cancel() {
+        if (!this._cancelled) {
+            this._cancelled = true;
+            for (const [, listener] of this._listeners) {
+                listener();
+            }
+        }
+    }
+    addListener(f) {
+        const id = this._id;
+        this._listeners.set(this._id++, f);
+        return id;
+    }
+    removeListener(id) {
+        return this._listeners.delete(id);
+    }
+    register(f, state) {
+        const $ = this;
+        const id = this.addListener(state == null ? f : () => f(state));
+        return { Dispose() { $.removeListener(id); } };
+    }
+    Dispose() {
+        // Implement IDisposable for compatibility but do nothing
+        // According to docs, calling Dispose does not trigger cancellation
+        // https://docs.microsoft.com/en-us/dotnet/api/system.threading.cancellationtokensource.dispose?view=net-6.0
+    }
+}
+class OperationCanceledException extends Exception {
+    constructor(msg) {
+        super(msg ?? "The operation was canceled");
+        // Object.setPrototypeOf(this, OperationCanceledException.prototype);
+    }
+}
+class Trampoline {
+    static get maxTrampolineCallCount() {
+        return 2000;
+    }
+    callCount;
+    // Set once a terminal continuation of the computation has been entered.
+    // After that point any exception unwinding through protectedCont comes from
+    // user continuation code, not the workflow body, and must propagate instead
+    // of being routed to onError (which would resolve the computation twice).
+    completed;
+    constructor() {
+        this.callCount = 0;
+        this.completed = false;
+    }
+    incrementAndCheck() {
+        return this.callCount++ > Trampoline.maxTrampolineCallCount;
+    }
+    hijack(f) {
+        this.callCount = 0;
+        setTimeout(f, 0);
+    }
+}
+function protectedCont(f) {
+    return (ctx) => {
+        if (ctx.cancelToken.isCancelled) {
+            ctx.onCancel(new OperationCanceledException());
+        }
+        else if (ctx.trampoline.incrementAndCheck()) {
+            ctx.trampoline.hijack(() => {
+                try {
+                    f(ctx);
+                }
+                catch (err) {
+                    if (ctx.trampoline.completed) {
+                        throw err;
+                    }
+                    ctx.onError(ensureErrorOrException(err));
+                }
+            });
+        }
+        else {
+            try {
+                f(ctx);
+            }
+            catch (err) {
+                // Once a terminal continuation has run the computation is complete, so
+                // an exception from user continuation code must propagate rather than be
+                // routed to onError (which would resolve the computation a second time,
+                // e.g. a succeeded try/with body re-entering its with handler).
+                if (ctx.trampoline.completed) {
+                    throw err;
+                }
+                ctx.onError(ensureErrorOrException(err));
+            }
+        }
+    };
+}
+function protectedBind(computation, binder) {
+    return protectedCont((ctx) => {
+        computation({
+            onSuccess: (x) => {
+                // Only guard the binder evaluation itself: the resulting computation
+                // is protected on its own, and re-catching what it throws would
+                // route continuation exceptions back into onError (double-resolve).
+                let bound;
+                try {
+                    bound = binder(x);
+                }
+                catch (err) {
+                    ctx.onError(ensureErrorOrException(err));
+                    return;
+                }
+                bound(ctx);
+            },
+            onError: ctx.onError,
+            onCancel: ctx.onCancel,
+            cancelToken: ctx.cancelToken,
+            trampoline: ctx.trampoline,
+        });
+    });
+}
+function protectedReturn(value) {
+    return protectedCont((ctx) => ctx.onSuccess(value));
+}
+class AsyncBuilder {
+    Bind(computation, binder) {
+        return protectedBind(computation, binder);
+    }
+    Combine(computation1, computation2) {
+        return this.Bind(computation1, () => computation2);
+    }
+    Delay(generator) {
+        return protectedCont((ctx) => generator()(ctx));
+    }
+    For(sequence, body) {
+        const iter = sequence[Symbol.iterator]();
+        let cur = iter.next();
+        return this.While(() => !cur.done, this.Delay(() => {
+            const res = body(cur.value);
+            cur = iter.next();
+            return res;
+        }));
+    }
+    Return(value) {
+        return protectedReturn(value);
+    }
+    ReturnFrom(computation) {
+        return computation;
+    }
+    TryFinally(computation, compensation) {
+        return protectedCont((ctx) => {
+            computation({
+                onSuccess: (x) => {
+                    compensation();
+                    ctx.onSuccess(x);
+                },
+                onError: (x) => {
+                    compensation();
+                    ctx.onError(x);
+                },
+                onCancel: (x) => {
+                    compensation();
+                    ctx.onCancel(x);
+                },
+                cancelToken: ctx.cancelToken,
+                trampoline: ctx.trampoline,
+            });
+        });
+    }
+    TryWith(computation, catchHandler) {
+        return protectedCont((ctx) => {
+            computation({
+                onSuccess: ctx.onSuccess,
+                onCancel: ctx.onCancel,
+                cancelToken: ctx.cancelToken,
+                trampoline: ctx.trampoline,
+                onError: (ex) => {
+                    // See protectedBind: only guard the handler evaluation itself.
+                    let handled;
+                    try {
+                        handled = catchHandler(ex);
+                    }
+                    catch (err) {
+                        ctx.onError(ensureErrorOrException(err));
+                        return;
+                    }
+                    handled(ctx);
+                },
+            });
+        });
+    }
+    Using(resource, binder) {
+        return this.TryFinally(binder(resource), () => resource.Dispose());
+    }
+    While(guard, computation) {
+        if (guard()) {
+            return this.Bind(computation, () => this.While(guard, computation));
+        }
+        else {
+            return this.Return(void 0);
+        }
+    }
+    Zero() {
+        return protectedCont((ctx) => ctx.onSuccess(void 0));
+    }
+}
+const singleton = new AsyncBuilder();
+
+function emptyContinuation(_x) {
+    // NOP
+}
+function awaitPromise(p) {
+    return fromContinuations((conts) => p.then(conts[0]).catch((err) => (err instanceof OperationCanceledException
+        ? conts[2] : conts[1])(err)));
+}
+const defaultCancellationToken = new CancellationToken();
+function catchAsync(work) {
+    return protectedCont((ctx) => {
+        work({
+            onSuccess: (x) => ctx.onSuccess(Choice_makeChoice1Of2(x)),
+            onError: (ex) => ctx.onSuccess(Choice_makeChoice2Of2(ex)),
+            onCancel: ctx.onCancel,
+            cancelToken: ctx.cancelToken,
+            trampoline: ctx.trampoline,
+        });
+    });
+}
+function fromContinuations(f) {
+    return protectedCont((ctx) => f([ctx.onSuccess, ctx.onError, ctx.onCancel]));
+}
+function startWithContinuations(computation, continuation, exceptionContinuation, cancellationContinuation, cancelToken) {
+    const trampoline = new Trampoline();
+    // Mark the computation completed as soon as a terminal continuation is entered
+    // so protectedCont lets exceptions from continuation code propagate instead of
+    // routing them to onError (see Trampoline.completed).
+    const done = (cont) => (x) => { trampoline.completed = true; return cont(x); };
+    computation({
+        onSuccess: done(continuation ? continuation : emptyContinuation),
+        onError: done(exceptionContinuation),
+        onCancel: done(cancellationContinuation),
+        cancelToken: cancelToken ? cancelToken : defaultCancellationToken,
+        trampoline,
+    });
+}
+function startAsPromise(computation, cancellationToken) {
+    return new Promise((resolve, reject) => startWithContinuations(computation, resolve, reject, reject, defaultCancellationToken));
+}
+
+function request$1(client, route, parameters) {
+    return client.request(route, parameters);
+}
+function mkdir(path, options) {
+    return mkdir$2(path, options).then(() => undefined);
+}
+function execFile(file, args, options) {
+    return new Promise((resolve, reject) => {
+        execFile$1(file, args, options, ((error, stdout, stderr) => {
+            if (Operators_IsNull(error)) {
+                resolve([stdout, stderr]);
+            }
+            else {
+                reject(new Exception(isNullOrWhiteSpace(stderr) ? error.message : stderr));
+            }
+        }));
+    });
+}
+
+// Unicode 13.0.0 codepoint ranges (delta encoded) and general categories.
+// Integer delta values are offset by 35 and stored as Unicode characters.
+const rangeDeltas = "#C$&$&$$$$$$%-%&%=$$$$$$=$$$$D$$'$$$$$$$$$$$$%$$%$$$$&$:$*;$+$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$%$$$$$$$$$$$$$$$%$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$%$$$$&%$$$%$&%'$%$&&%$%$$$$$%$$%$$%$&$$$%%$$&'$$$$$$$$$$$$$$$$$$$$$$$$%$$$$$$$$$$$$$$$$$%$$$$$&$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$*%$%%$$'$$$$$$$$h$>5'/1(*$$$4$$$$$$$$%$&$$'%$$&$$$%$4$,F$%&&$$$$$$$$$$$$$$$$$$$$$$$($$$$$%%VS$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$(%$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$%$$$$$$$$$$$$%$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$I%$)L$$%%$$P$$$%$%$$+>''%.)&%$%%.$$$%C$-8-'%$$$*$$)%%$'%-&%$1$$$$A>%|.$1-D,%$&$%$%9'$,$&$(%2$<&%$$.X8$5.2$C$Y$$$$&+'$%$*-%%-$$2$%$+%%%9$*$$&'%$$&'%%%%$$+$'%$&%%-%%)$$$$$%%$$)'%%9$*$%$%$%%$$&%'%%&&$*'$$*-%&$$-%$$,$&$9$*$%$(%$$&($%$$%$%$2%%%-$$*$)$$%$+%%%9$*$%$(%$$$$$'%%%%$*%$'%$&%%-$$)-$$$)&&$'&%$$$%&%&&&/'%$%&&$&$%$)$1-&)$$($&$+$&$:$3&$&'$&$'*%$&(%%%-*$*$$$%$+$&$:$-$(%$$$$($$%$%%*%*$$%%%-$%0%%,$&$L%$&'$&$&$$$'&$*&%%-,$)$$%$5&;$,$$%*&$'&&$$$+)-%%$/S$%*'$)$+$-%H%$$$($;$$$-$%,$%($$$)%-%'C$&2$$&%)--$$$$$$$$$$%+$G'1$($%(.$G$+$)$%('%HN%'$)$%%%$-))%%'&$&%*&'0$%%)$$$-&$%I$$($%N$$&Ŭ$'%*$$$'%L$'%D$'%*$$$'%2$\\$'%f%&,7&3-)y%)%$ʏ$$4$=$$&n&&+*0$'&.5&%,5%/0$&$%/W%$*+$%.&$&$$$%-)-))$'&$$-)F$X*(%E$$(i-B$&'%&'%$)&'$&%-A%(.O'=)-$&E:%%$%%X$$$*$$$$%+)-%$-)-)*$)%1$%b'$R$$($$($%*'-*-,,&%$A$'%%$&%-O$$%&$$&%+'G++%%&(-&&-A)%,*N%&++&$0$*'$)$%$%$(Ob0$EH]$($$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$,$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$,+)%)%++++)%)%+$$$$$$$$++1%++++++($%'$$$&&$%'$&'%%'$&+(&%&$%'$%$.()%$$$%$$$+$$($,$$'%&$$$.$$$-$($-$$%)&$$$-&$$$0&C30'$&/2%$'$%$&%&$$$%$()$$$$$$'$$'$'$%%%($'$$%$$3F$$'$%'((%'$%$%$*$B%%$$$Bį+$$$$7%*$$t$A<K)h<.8_q9Ú$,$Y+$ě$$$$$$$$$$$$$$AO($$B$$$$$$$$$$3ģ¦$$$$$$$$$$$$$$$$$$$$$$b$$$$C$$ĥS8%)J%C$R$R$$$&%$$$$$$'$$%$)%&$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$%)$$$$&$$('$%I$$($%[*$$1$:,*$*$*$*$*$*$*$*$C%$$$$&$$$$$,$%$$$$%$$$$$$$$$$($-%'$$$0%$P=$|/ù=/'$&$$$$$$$$$$$$$$%$$$$$$$$$$%$,'%$(%&$$$%$y%%%%$$}$&$(N$$%'-CG/3B$-A+$2C-J2ţ᧣c删&8$Қ&Z,K)%į$&3-%7$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$&$-$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$%%i-%)+:,%$$$$$$$$$$$$$&$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$+$$$$%$$$$$$$$$$%$$$$$$$$&$$$$$$$$$$$$$$$$$$$$($($$$$$$$$$$$%$$'$$$M$$$%$*$&$'$:%%$'$&)%$$)W'+%U3%+%-)5)&$$%$-?+%:.%.$@&&$R$%'%%&0$$-'%($$,-($L)%%%%,&$+$$%-%'3$)&$$$$U$$&%%(%$$$;%$%.$%%%$%$$-)%)%),*$*$N$',$%'sF%$%$%$$$%-)⯇/:'T'ࠣᤣƑ%I*/(($$-$0$($$$%$%$34Ǝ$$3c%YK/$$%3*$$$)3$%%$$$$$$$$$$$$$$$$%$$'&&$'$$$$$$$&$$&$$$%'($ª%$$&$&$$$$$$%-%&%=$$$$$$=$$$$$$$$$%-$P%B&)%)%)%&&%$$$%$$'%-&%%/$=$6$%$2%1E(&'P&,X'4%&$0&$RP$¥@&T2$>'C',7$+$(I((A$$G'+$(MKKq%-)G'G'K+W.$³Ś,9-+»)%$$O$%&$%:$$+:%*B+,S6$%((9)&$=($c['%%3%Q$&$%(''$&$@%&'$,*,*@%$@&C+$?%'(*,Y&*9%+6(+5*'/*slZV0V*)G'+-ŉB$M$%$%%q@-$+9.'(y8*7:,$$$X2*'7-2&$P&'%%%$'.$%<*-)&G($+$-'$%$+F$%$,%$S&,%'''$$$-$$$&$7.5$<&&%$$%)$d*$$$'$2$-$)R$&+(-)%%$+%%%9$*$%$($%$%$'%%%&%$)$((%%*&(®X&+%&$$'(-%$$$&AS&)$$'%$%%$$+-ÉR&'%'%$%:'%ES&+%$$%&$.-)06N$$$%)$$$*-Y>%&%'$('-%&$ãO&,$%$CC-,/+%$%+$%$;)$%%%$$$$$$$&,-i+%J&'%%'$$$$$>$-K)$$'+$+$)%&Q0$%&$(@\\Ī,$H$*$)$$$(--6&%A%9$$*$%$%l*$%$I)&$$%$*$$+-))$%$C($%$%$$$$*-ř6%%%Ú$28+'40$ν$(.ç૟ђ$,࿪ɪ⇜ɜ*B$-'%A%($-S*(''$$--$*$8(6˓CC:'n'$$Z*'0c%$$$.%1᠛+ӹM,⌚łT&4'+Ưध(0&,*-%$%$'፿ę-J%_%&&)++%*A'^:e&$½7/z,<ª===*$5==$$%%$%%%'$+'$$$*$.==%$'%+$*$=%$'$($$&*$============?%<$<$)<$<$)<$<$)<$<$)<$<$)$$%UȣZ'U+$1$%(2($2ճ*$4%*$%$(øP&**%-'$$ƓO'-($ԣè%,*LEE*$'-'%̴^$&$'oP$2å'$>$%$$%$$-$'$$$$)$'$$$$$$&$%$$%$$$$$$$$$$%$$%'$*$'$'$$$-$4(&$($4W%ıO'/2%2$2$H-0Ä[@0O',*%1)½Ğ(˻+0&0&/|*/7/'[+-)K+A%%q$u$ª/1%(&&(*,<**,&0*L¶$ZH-Щ꜁Eၘ.ā%ᚥ1ᵔూɁ؅፮򮳙$A£ē︳𐀡%𐀡";
+const categories = "1.;=;78;<;6;+;<;#7;8>5>$7<8<1.;=?;>?'9<2?>?<->$;>-':-;#<#$<$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$'#$'#%$#%$#%$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#%$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$'$&>&>&>&>&>(#$#$&>#$@&$;#@>#;#@#@#$#@#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$<#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$?(*#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$@#@&;$;6@?=@(6(;(;(;(@'@';@2<;=;?(;2@;'&'(+;'(';'(2?(&(?('+'?';@2'('(@'('@+'(&?;&@(='(&(&(&(@;@'(@;@'@'@'@(2()'()(')()()'('(;+;&'()@'@'@'@'@'@'@(')(@)@)('@)@'@'(@+'=-?=';(@()@'@'@'@'@'@'@'@(@)(@(@(@(@'@'@+('(;@()@'@'@'@'@'@'@(')(@()@)(@'@'(@+;=@'(@()@'@'@'@'@'@'@(')()(@)@)(@()@'@'(@+?'-@('@'@'@'@'@'@'@'@'@'@)()@)@)(@'@)@+-?=?@()('@'@'@'@'()@(@(@(@'@'(@+@;-?'();'@'@'@'@'@(')()@()@)(@)@'@'(@+@'@()'@'@'(')(@)@)('?@')-'(@+-?'@()@'@'@'@'@'@(@)(@(@)@+@);@'('(@='&(;+;@'@'@'@'@'@'('('@'@&@(@+@'@'?;?;?(?+-?(?(?(7878)'@'@()(;('(@(@?(?@?;?;@')()()()('+;')('(')')'('()()(')+)(?#@#@#@$;&$'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@(;-@'?@#@$@6'?;'.'78@';,'@'@'(@'(;@'(@'@'@(@'()()()(;&;='(@+@-@;6;(2@+@'&'@'('('@'@'@()()@)()(@?@;+'@'@'@'@+-@?'()(@;')()(@()()()(@(+@+@;&;@(*(@()'()()()()'@+;?(?@()')()()('+'()()()()@;')()(@;+@'+'&;$@#@#;@(;()('('(')('@$&$&$&(@(#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$@#@$#$#$@#@$@#@#@#@#$#$@$%$%$%$@$#%>$>$@$#%>$@$#@>$#>@$@$#%>@.26;9:79:79;/02.;9:;5;<78;<;5;.2@2-&@-<78&-<78@&@=@(*(*(@?#?#?$#$#$?#?<#?#?#?#?#?$#$'$?$#<#$?<?$?-,#$,-?@<?<?<?<?<?<?<?<?<?<?7878?<?78?<?<?<?@?@-?-?<?<?<?<?78787878787878-?<78<7878787878<?<7878787878787878787878<7878<78<?<?<?@?@?#@$@#$#$#$#$#$#$#$#$&#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$?#$#$(#$@;-;$@$@$@'@&;@('@'@'@'@'@'@'@'@'@(;9:9:;9:;9:;6;6;9:;9:78787878;&;6;6;7;?;@?@?@?@?@.;?&',7878787878?78787878678?,()6&?,&';?@'@(>&'6';&'@'@'@?-?'?@'?@-?-?-?-?-?'?'@'&'@?@'&;'&;'+'@#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$'(*;(;&#$#$#$#$#$#$#$#$#$#$#$#$#$#$&(',(;@>&>#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$&$#$#$#$#$#$#$#$&>#$#$'#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$@#$#$#$@#$'&$'('('(')()?(@-?=?@';@)')(@;+@(';';'(+'(;'()@;'@()'()()();@&+@;'(&'+'@'()()(@'('()@+@;'&'?')()'('('('('('@'&;')();'&)(@'@'@'@'@'@$>&$&>@$')()();)(@+@'@'@'@34'@'@$@$@'('<'@'@'@'@'@'>@'87@'@'@'=?@(;78;@(;657878787878787878;78;5;@;6787878;<6<@;=;@'@'@2@;=;78;<;6;+;<;#7;8>5>$7<8<78;78;'&'&'@'@'@'@'@=<>?=@?<?@2?@'@'@'@'@'@'@'@;@-@?,-?-?@?@?@?(@'@'@(-@'-@',',@'(@'@;'@';,@#$'@+@#@$@'@'@;@'@'@'@'@'@'@'@'@'@;-'?-'@-@'@'@-'-@;'@;@'@-'-@-'(@(@('@'@'@(@(-@;@'-;'-@'?'(@-;@'@;'@-'@-'@;@-@'@#@$@-'(@+@-@'@(6@'@'-'@'(-;@'-@'@)()'(;@-+@()')()(;2;@2@'@+@('()(@+;')'@'(;'@()')()';(;)(+';';@-@'@')()()(;(@'@'@'@'@';@'()(@+@()@'@'@'@'@'@'@(')()@)@)@'@)@')@(@(@')()()(';+;@;('@')()()()(';'@+@')(@)()(;'(@')()()(;'@+@;@'()()()('@+@'@()()(@+-;?@')()(;@#$+-@'@'@'@'@')@)@()(')')(;@+@'@')(@()(';')@'('()'(;(@'()('()(;';@'@'@')(@()(';@+-@;'@(@)()()(@'@'@'(@(@(@('(@+@'@'@')@(@)()('@+@'();@'@-?=?@;'@,@;@'@'@2@'@'@'@+@;@'@(;@'(;?&;?@+@-@'@'@#$-;@'@(')@(&@&;&(@)@'@'@'@'@'@'@'@'@'@'@'@?(;2@?@?@?)(?)2(?(?(?@?(?@-@?@-@#$#$@$#$#@#@#@#@#@#$@$@$@$#$#@#@#@#@$#@#@#@#@#@$#$#$#$#$#$#$@#<$<$#<$<$#<$<$#<$<$#<$<$#$@+?(?(?(?(?;@(@(@(@(@(@(@(@'@(&@+@'?@'(+@=@'@-(@#$(&@+@;@-?-=-@-?-@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@<@?@?@?@?@?@?@-?@?@?@?@?@?@?>?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@+@'@'@'@'@'@'@'@2@2@(@4@4@";
+
+function getCategoryFunc() {
+    // unpack Unicode codepoint ranges (delta encoded) and general categories
+    const offset = 35; // offsets unprintable characters
+    const a1 = [...rangeDeltas].map((ch) => (ch.codePointAt(0) ?? 0) - offset);
+    const a2 = [...categories].map((ch) => (ch.codePointAt(0) ?? 0) - offset);
+    const codepoints = new Uint32Array(a1);
+    const categories$1 = new Uint8Array(a2);
+    for (let i = 1; i < codepoints.length; ++i) {
+        codepoints[i] += codepoints[i - 1];
+    }
+    // binary search in unicode ranges
+    return (cp) => {
+        let hi = codepoints.length;
+        let lo = 0;
+        while (hi - lo > 1) {
+            const mid = Math.floor((hi + lo) / 2);
+            const test = codepoints[mid];
+            if (cp < test) {
+                hi = mid;
+            }
+            else if (cp === test) {
+                hi = lo = mid;
+                break;
+            }
+            else if (test < cp) {
+                lo = mid;
+            }
+        }
+        return categories$1[lo];
+    };
+}
+const UnicodeCategory = {
+    UppercaseLetter: 0};
+const isUpperMask = 1 << UnicodeCategory.UppercaseLetter;
+const unicodeCategoryFunc = getCategoryFunc();
+function charCodeAt(s, index) {
+    if (index < s.length) {
+        return s.charCodeAt(index);
+    }
+    else {
+        throw new Exception("Index out of range.");
+    }
+}
+const isUpper = (s) => isUpper2(s, 0);
+function getUnicodeCategory2(s, index) {
+    const cp = charCodeAt(s, index);
+    return unicodeCategoryFunc(cp);
+}
+function isUpper2(s, index) {
+    const test = 1 << getUnicodeCategory2(s, index);
+    return (test & isUpperMask) !== 0;
+}
+
+/**
+ * Lowercase the first character; leave the rest alone.
+ */
+function lowerFirst(name) {
+    if (name.length === 0) {
+        return name;
+    }
+    else {
+        return name[0].toLowerCase() + name.slice(1, name.length);
+    }
+}
+/**
+ * Convert a snake_case name back to PascalCase.
+ */
+function fromSnakeCase(name) {
+    return join("", map$2((part) => {
+        if (part.length === 0) {
+            return part;
+        }
+        else {
+            return part[0].toUpperCase() + part.slice(1, part.length);
+        }
+    }, split(name, ["_"], undefined, 0)));
+}
+/**
+ * True if the name contains any uppercase letter (i.e., looks like Pascal/camelCase
+ * rather than snake_case). Used to decide whether to convert before applying a rule.
+ */
+function hasUpper(name) {
+    return exists$1(isUpper, name.split(""));
+}
+function toCanonicalPascal(name) {
+    if (hasUpper(name)) {
+        return name;
+    }
+    else {
+        return fromSnakeCase(name);
+    }
 }
 
 function FSharpResult$2_Ok(ResultValue) {
@@ -32539,6 +32772,2226 @@ function Result_MapError(mapping, result) {
     }
 }
 
+class MapTreeLeaf$2 {
+    v;
+    k;
+    constructor(k, v) {
+        this.k = k;
+        this.v = v;
+    }
+}
+function MapTreeLeaf$2_$ctor_5BDDA1(k, v) {
+    return new MapTreeLeaf$2(k, v);
+}
+function MapTreeLeaf$2__get_Key(_) {
+    return _.k;
+}
+function MapTreeLeaf$2__get_Value(_) {
+    return _.v;
+}
+class MapTreeNode$2 extends MapTreeLeaf$2 {
+    right;
+    left;
+    h;
+    constructor(k, v, left, right, h) {
+        super(k, v);
+        this.left = left;
+        this.right = right;
+        this.h = (h | 0);
+    }
+}
+function MapTreeNode$2_$ctor_Z39DE9543(k, v, left, right, h) {
+    return new MapTreeNode$2(k, v, left, right, h);
+}
+function MapTreeNode$2__get_Left(_) {
+    return _.left;
+}
+function MapTreeNode$2__get_Right(_) {
+    return _.right;
+}
+function MapTreeNode$2__get_Height(_) {
+    return _.h | 0;
+}
+function MapTreeModule_empty() {
+    return undefined;
+}
+function MapTreeModule_sizeAux(acc_mut, m_mut) {
+    MapTreeModule_sizeAux: while (true) {
+        const acc = acc_mut, m = m_mut;
+        if (m != null) {
+            const m2 = value(m);
+            if (m2 instanceof MapTreeNode$2) {
+                const mn = m2;
+                acc_mut = MapTreeModule_sizeAux(acc + 1, MapTreeNode$2__get_Left(mn));
+                m_mut = MapTreeNode$2__get_Right(mn);
+                continue MapTreeModule_sizeAux;
+            }
+            else {
+                return (acc + 1) | 0;
+            }
+        }
+        else {
+            return acc | 0;
+        }
+    }
+}
+function MapTreeModule_size(x) {
+    return MapTreeModule_sizeAux(0, x) | 0;
+}
+function MapTreeModule_mk(l, k, v, r) {
+    let mn = undefined, mn_1 = undefined;
+    let hl;
+    const m = l;
+    if (m != null) {
+        const m2 = value(m);
+        hl = ((m2 instanceof MapTreeNode$2) ? ((mn = m2, MapTreeNode$2__get_Height(mn))) : 1);
+    }
+    else {
+        hl = 0;
+    }
+    let hr;
+    const m_1 = r;
+    if (m_1 != null) {
+        const m2_1 = value(m_1);
+        hr = ((m2_1 instanceof MapTreeNode$2) ? ((mn_1 = m2_1, MapTreeNode$2__get_Height(mn_1))) : 1);
+    }
+    else {
+        hr = 0;
+    }
+    const m_2 = ((hl < hr) ? hr : hl) | 0;
+    if (m_2 === 0) {
+        return MapTreeLeaf$2_$ctor_5BDDA1(k, v);
+    }
+    else {
+        return MapTreeNode$2_$ctor_Z39DE9543(k, v, l, r, m_2 + 1);
+    }
+}
+function MapTreeModule_rebalance(t1, k, v, t2) {
+    let mn = undefined, mn_1 = undefined, m_2 = undefined, m2_2 = undefined, mn_2 = undefined, m_3 = undefined, m2_3 = undefined, mn_3 = undefined;
+    let t1h;
+    const m = t1;
+    if (m != null) {
+        const m2 = value(m);
+        t1h = ((m2 instanceof MapTreeNode$2) ? ((mn = m2, MapTreeNode$2__get_Height(mn))) : 1);
+    }
+    else {
+        t1h = 0;
+    }
+    let t2h;
+    const m_1 = t2;
+    if (m_1 != null) {
+        const m2_1 = value(m_1);
+        t2h = ((m2_1 instanceof MapTreeNode$2) ? ((mn_1 = m2_1, MapTreeNode$2__get_Height(mn_1))) : 1);
+    }
+    else {
+        t2h = 0;
+    }
+    if (t2h > (t1h + 2)) {
+        const matchValue = value(t2);
+        if (matchValue instanceof MapTreeNode$2) {
+            const t2$0027 = matchValue;
+            if (((m_2 = MapTreeNode$2__get_Left(t2$0027), (m_2 != null) ? ((m2_2 = value(m_2), (m2_2 instanceof MapTreeNode$2) ? ((mn_2 = m2_2, MapTreeNode$2__get_Height(mn_2))) : 1)) : 0)) > (t1h + 1)) {
+                const matchValue_1 = value(MapTreeNode$2__get_Left(t2$0027));
+                if (matchValue_1 instanceof MapTreeNode$2) {
+                    const t2l = matchValue_1;
+                    return MapTreeModule_mk(MapTreeModule_mk(t1, k, v, MapTreeNode$2__get_Left(t2l)), MapTreeLeaf$2__get_Key(t2l), MapTreeLeaf$2__get_Value(t2l), MapTreeModule_mk(MapTreeNode$2__get_Right(t2l), MapTreeLeaf$2__get_Key(t2$0027), MapTreeLeaf$2__get_Value(t2$0027), MapTreeNode$2__get_Right(t2$0027)));
+                }
+                else {
+                    throw new Exception("internal error: Map.rebalance");
+                }
+            }
+            else {
+                return MapTreeModule_mk(MapTreeModule_mk(t1, k, v, MapTreeNode$2__get_Left(t2$0027)), MapTreeLeaf$2__get_Key(t2$0027), MapTreeLeaf$2__get_Value(t2$0027), MapTreeNode$2__get_Right(t2$0027));
+            }
+        }
+        else {
+            throw new Exception("internal error: Map.rebalance");
+        }
+    }
+    else if (t1h > (t2h + 2)) {
+        const matchValue_2 = value(t1);
+        if (matchValue_2 instanceof MapTreeNode$2) {
+            const t1$0027 = matchValue_2;
+            if (((m_3 = MapTreeNode$2__get_Right(t1$0027), (m_3 != null) ? ((m2_3 = value(m_3), (m2_3 instanceof MapTreeNode$2) ? ((mn_3 = m2_3, MapTreeNode$2__get_Height(mn_3))) : 1)) : 0)) > (t2h + 1)) {
+                const matchValue_3 = value(MapTreeNode$2__get_Right(t1$0027));
+                if (matchValue_3 instanceof MapTreeNode$2) {
+                    const t1r = matchValue_3;
+                    return MapTreeModule_mk(MapTreeModule_mk(MapTreeNode$2__get_Left(t1$0027), MapTreeLeaf$2__get_Key(t1$0027), MapTreeLeaf$2__get_Value(t1$0027), MapTreeNode$2__get_Left(t1r)), MapTreeLeaf$2__get_Key(t1r), MapTreeLeaf$2__get_Value(t1r), MapTreeModule_mk(MapTreeNode$2__get_Right(t1r), k, v, t2));
+                }
+                else {
+                    throw new Exception("internal error: Map.rebalance");
+                }
+            }
+            else {
+                return MapTreeModule_mk(MapTreeNode$2__get_Left(t1$0027), MapTreeLeaf$2__get_Key(t1$0027), MapTreeLeaf$2__get_Value(t1$0027), MapTreeModule_mk(MapTreeNode$2__get_Right(t1$0027), k, v, t2));
+            }
+        }
+        else {
+            throw new Exception("internal error: Map.rebalance");
+        }
+    }
+    else {
+        return MapTreeModule_mk(t1, k, v, t2);
+    }
+}
+function MapTreeModule_add(comparer, k, v, m) {
+    if (m != null) {
+        const m2 = value(m);
+        const c = comparer.Compare(k, MapTreeLeaf$2__get_Key(m2)) | 0;
+        if (m2 instanceof MapTreeNode$2) {
+            const mn = m2;
+            if (c < 0) {
+                return MapTreeModule_rebalance(MapTreeModule_add(comparer, k, v, MapTreeNode$2__get_Left(mn)), MapTreeLeaf$2__get_Key(mn), MapTreeLeaf$2__get_Value(mn), MapTreeNode$2__get_Right(mn));
+            }
+            else if (c === 0) {
+                return MapTreeNode$2_$ctor_Z39DE9543(k, v, MapTreeNode$2__get_Left(mn), MapTreeNode$2__get_Right(mn), MapTreeNode$2__get_Height(mn));
+            }
+            else {
+                return MapTreeModule_rebalance(MapTreeNode$2__get_Left(mn), MapTreeLeaf$2__get_Key(mn), MapTreeLeaf$2__get_Value(mn), MapTreeModule_add(comparer, k, v, MapTreeNode$2__get_Right(mn)));
+            }
+        }
+        else if (c < 0) {
+            return MapTreeNode$2_$ctor_Z39DE9543(k, v, MapTreeModule_empty(), m, 2);
+        }
+        else if (c === 0) {
+            return MapTreeLeaf$2_$ctor_5BDDA1(k, v);
+        }
+        else {
+            return MapTreeNode$2_$ctor_Z39DE9543(k, v, m, MapTreeModule_empty(), 2);
+        }
+    }
+    else {
+        return MapTreeLeaf$2_$ctor_5BDDA1(k, v);
+    }
+}
+function MapTreeModule_tryFind(comparer_mut, k_mut, m_mut) {
+    MapTreeModule_tryFind: while (true) {
+        const comparer = comparer_mut, k = k_mut, m = m_mut;
+        if (m != null) {
+            const m2 = value(m);
+            const c = comparer.Compare(k, MapTreeLeaf$2__get_Key(m2)) | 0;
+            if (c === 0) {
+                return some(MapTreeLeaf$2__get_Value(m2));
+            }
+            else if (m2 instanceof MapTreeNode$2) {
+                const mn = m2;
+                comparer_mut = comparer;
+                k_mut = k;
+                m_mut = ((c < 0) ? MapTreeNode$2__get_Left(mn) : MapTreeNode$2__get_Right(mn));
+                continue MapTreeModule_tryFind;
+            }
+            else {
+                return undefined;
+            }
+        }
+        else {
+            return undefined;
+        }
+    }
+}
+function MapTreeModule_find(comparer, k, m) {
+    const matchValue = MapTreeModule_tryFind(comparer, k, m);
+    if (matchValue == null) {
+        throw KeyNotFoundException_$ctor();
+    }
+    else {
+        return value(matchValue);
+    }
+}
+function MapTreeModule_mem(comparer_mut, k_mut, m_mut) {
+    MapTreeModule_mem: while (true) {
+        const comparer = comparer_mut, k = k_mut, m = m_mut;
+        if (m != null) {
+            const m2 = value(m);
+            const c = comparer.Compare(k, MapTreeLeaf$2__get_Key(m2)) | 0;
+            if (m2 instanceof MapTreeNode$2) {
+                const mn = m2;
+                if (c < 0) {
+                    comparer_mut = comparer;
+                    k_mut = k;
+                    m_mut = MapTreeNode$2__get_Left(mn);
+                    continue MapTreeModule_mem;
+                }
+                else if (c === 0) {
+                    return true;
+                }
+                else {
+                    comparer_mut = comparer;
+                    k_mut = k;
+                    m_mut = MapTreeNode$2__get_Right(mn);
+                    continue MapTreeModule_mem;
+                }
+            }
+            else {
+                return c === 0;
+            }
+        }
+        else {
+            return false;
+        }
+    }
+}
+function MapTreeModule_iterOpt(f_mut, m_mut) {
+    MapTreeModule_iterOpt: while (true) {
+        const f = f_mut, m = m_mut;
+        if (m != null) {
+            const m2 = value(m);
+            if (m2 instanceof MapTreeNode$2) {
+                const mn = m2;
+                MapTreeModule_iterOpt(f, MapTreeNode$2__get_Left(mn));
+                f(MapTreeLeaf$2__get_Key(mn), MapTreeLeaf$2__get_Value(mn));
+                f_mut = f;
+                m_mut = MapTreeNode$2__get_Right(mn);
+                continue MapTreeModule_iterOpt;
+            }
+            else {
+                f(MapTreeLeaf$2__get_Key(m2), MapTreeLeaf$2__get_Value(m2));
+            }
+        }
+        break;
+    }
+}
+function MapTreeModule_iter(f, m) {
+    MapTreeModule_iterOpt(f, m);
+}
+function MapTreeModule_foldOpt(f_mut, x_mut, m_mut) {
+    MapTreeModule_foldOpt: while (true) {
+        const f = f_mut, x = x_mut, m = m_mut;
+        if (m != null) {
+            const m2 = value(m);
+            if (m2 instanceof MapTreeNode$2) {
+                const mn = m2;
+                f_mut = f;
+                x_mut = f(MapTreeModule_foldOpt(f, x, MapTreeNode$2__get_Left(mn)), MapTreeLeaf$2__get_Key(mn), MapTreeLeaf$2__get_Value(mn));
+                m_mut = MapTreeNode$2__get_Right(mn);
+                continue MapTreeModule_foldOpt;
+            }
+            else {
+                return f(x, MapTreeLeaf$2__get_Key(m2), MapTreeLeaf$2__get_Value(m2));
+            }
+        }
+        else {
+            return x;
+        }
+    }
+}
+function MapTreeModule_fold(f, x, m) {
+    return MapTreeModule_foldOpt(f, x, m);
+}
+function MapTreeModule_toList(m) {
+    const loop = (m_1_mut, acc_mut) => {
+        loop: while (true) {
+            const m_1 = m_1_mut, acc = acc_mut;
+            if (m_1 != null) {
+                const m2 = value(m_1);
+                if (m2 instanceof MapTreeNode$2) {
+                    const mn = m2;
+                    m_1_mut = MapTreeNode$2__get_Left(mn);
+                    acc_mut = cons([MapTreeLeaf$2__get_Key(mn), MapTreeLeaf$2__get_Value(mn)], loop(MapTreeNode$2__get_Right(mn), acc));
+                    continue loop;
+                }
+                else {
+                    return cons([MapTreeLeaf$2__get_Key(m2), MapTreeLeaf$2__get_Value(m2)], acc);
+                }
+            }
+            else {
+                return acc;
+            }
+        }
+    };
+    return loop(m, empty$1());
+}
+function MapTreeModule_copyToArray(m, arr, i) {
+    let j = i;
+    MapTreeModule_iter((x, y) => {
+        setItem(arr, j, [x, y]);
+        j = ((j + 1) | 0);
+    }, m);
+}
+function MapTreeModule_ofList(comparer, l) {
+    return fold$1((acc, tupledArg) => MapTreeModule_add(comparer, tupledArg[0], tupledArg[1], acc), MapTreeModule_empty(), l);
+}
+function MapTreeModule_mkFromEnumerator(comparer_mut, acc_mut, e_mut) {
+    MapTreeModule_mkFromEnumerator: while (true) {
+        const comparer = comparer_mut, acc = acc_mut, e = e_mut;
+        if (e["System.Collections.IEnumerator.MoveNext"]()) {
+            const patternInput = e["System.Collections.Generic.IEnumerator`1.get_Current"]();
+            comparer_mut = comparer;
+            acc_mut = MapTreeModule_add(comparer, patternInput[0], patternInput[1], acc);
+            e_mut = e;
+            continue MapTreeModule_mkFromEnumerator;
+        }
+        else {
+            return acc;
+        }
+    }
+}
+function MapTreeModule_ofArray(comparer, arr) {
+    let res = MapTreeModule_empty();
+    for (let idx = 0; idx <= (arr.length - 1); idx++) {
+        const forLoopVar = item(idx, arr);
+        res = MapTreeModule_add(comparer, forLoopVar[0], forLoopVar[1], res);
+    }
+    return res;
+}
+function MapTreeModule_ofSeq(comparer, c) {
+    if (isArrayLike(c)) {
+        return MapTreeModule_ofArray(comparer, c);
+    }
+    else if (c instanceof FSharpList) {
+        return MapTreeModule_ofList(comparer, c);
+    }
+    else {
+        const ie = getEnumerator(c);
+        try {
+            return MapTreeModule_mkFromEnumerator(comparer, MapTreeModule_empty(), ie);
+        }
+        finally {
+            disposeSafe(ie);
+        }
+    }
+}
+/**
+ * Imperative left-to-right iterators.
+ */
+class MapTreeModule_MapIterator$2 extends Record {
+    stack;
+    started;
+    constructor(stack, started) {
+        super();
+        this.stack = stack;
+        this.started = started;
+    }
+}
+function MapTreeModule_collapseLHS(stack_mut) {
+    MapTreeModule_collapseLHS: while (true) {
+        const stack = stack_mut;
+        if (!isEmpty(stack)) {
+            const rest = tail(stack);
+            const m = head(stack);
+            if (m != null) {
+                const m2 = value(m);
+                if (m2 instanceof MapTreeNode$2) {
+                    const mn = m2;
+                    stack_mut = ofArrayWithTail([MapTreeNode$2__get_Left(mn), MapTreeLeaf$2_$ctor_5BDDA1(MapTreeLeaf$2__get_Key(mn), MapTreeLeaf$2__get_Value(mn)), MapTreeNode$2__get_Right(mn)], rest);
+                    continue MapTreeModule_collapseLHS;
+                }
+                else {
+                    return stack;
+                }
+            }
+            else {
+                stack_mut = rest;
+                continue MapTreeModule_collapseLHS;
+            }
+        }
+        else {
+            return empty$1();
+        }
+    }
+}
+function MapTreeModule_mkIterator(m) {
+    return new MapTreeModule_MapIterator$2(MapTreeModule_collapseLHS(singleton$1(m)), false);
+}
+function MapTreeModule_notStarted() {
+    throw new Exception("enumeration not started");
+}
+function MapTreeModule_alreadyFinished() {
+    throw new Exception("enumeration already finished");
+}
+function MapTreeModule_current(i) {
+    if (i.started) {
+        const matchValue = i.stack;
+        if (!isEmpty(matchValue)) {
+            if (head(matchValue) != null) {
+                const m = value(head(matchValue));
+                if (m instanceof MapTreeNode$2) {
+                    throw new Exception("Please report error: Map iterator, unexpected stack for current");
+                }
+                else {
+                    return [MapTreeLeaf$2__get_Key(m), MapTreeLeaf$2__get_Value(m)];
+                }
+            }
+            else {
+                throw new Exception("Please report error: Map iterator, unexpected stack for current");
+            }
+        }
+        else {
+            return MapTreeModule_alreadyFinished();
+        }
+    }
+    else {
+        return MapTreeModule_notStarted();
+    }
+}
+function MapTreeModule_moveNext(i) {
+    if (i.started) {
+        const matchValue = i.stack;
+        if (!isEmpty(matchValue)) {
+            if (head(matchValue) != null) {
+                const m = value(head(matchValue));
+                if (m instanceof MapTreeNode$2) {
+                    throw new Exception("Please report error: Map iterator, unexpected stack for moveNext");
+                }
+                else {
+                    i.stack = MapTreeModule_collapseLHS(tail(matchValue));
+                    return !isEmpty(i.stack);
+                }
+            }
+            else {
+                throw new Exception("Please report error: Map iterator, unexpected stack for moveNext");
+            }
+        }
+        else {
+            return false;
+        }
+    }
+    else {
+        i.started = true;
+        return !isEmpty(i.stack);
+    }
+}
+function MapTreeModule_mkIEnumerator(m) {
+    let i = MapTreeModule_mkIterator(m);
+    return {
+        "System.Collections.Generic.IEnumerator`1.get_Current"() {
+            return MapTreeModule_current(i);
+        },
+        "System.Collections.IEnumerator.get_Current"() {
+            return MapTreeModule_current(i);
+        },
+        "System.Collections.IEnumerator.MoveNext"() {
+            return MapTreeModule_moveNext(i);
+        },
+        "System.Collections.IEnumerator.Reset"() {
+            i = MapTreeModule_mkIterator(m);
+        },
+        Dispose() {
+        },
+    };
+}
+class FSharpMap {
+    tree;
+    comparer;
+    constructor(comparer, tree) {
+        this.comparer = comparer;
+        this.tree = tree;
+    }
+    GetHashCode() {
+        const this$ = this;
+        return FSharpMap__ComputeHashCode(this$) | 0;
+    }
+    Equals(other) {
+        const this$ = this;
+        if (other instanceof FSharpMap) {
+            const that = other;
+            const e1 = getEnumerator(this$);
+            try {
+                const e2 = getEnumerator(that);
+                try {
+                    const loop = () => {
+                        const m1 = e1["System.Collections.IEnumerator.MoveNext"]();
+                        if (m1 === e2["System.Collections.IEnumerator.MoveNext"]()) {
+                            if (!m1) {
+                                return true;
+                            }
+                            else {
+                                const e1c = e1["System.Collections.Generic.IEnumerator`1.get_Current"]();
+                                const e2c = e2["System.Collections.Generic.IEnumerator`1.get_Current"]();
+                                if (equals$1(e1c[0], e2c[0]) && equals$1(e1c[1], e2c[1])) {
+                                    return loop();
+                                }
+                                else {
+                                    return false;
+                                }
+                            }
+                        }
+                        else {
+                            return false;
+                        }
+                    };
+                    return loop();
+                }
+                finally {
+                    disposeSafe(e2);
+                }
+            }
+            finally {
+                disposeSafe(e1);
+            }
+        }
+        else {
+            return false;
+        }
+    }
+    toString() {
+        const this$ = this;
+        return ("map [" + join("; ", map$1((kv) => format("({0}, {1})", kv[0], kv[1]), this$))) + "]";
+    }
+    get [Symbol.toStringTag]() {
+        return "FSharpMap";
+    }
+    toJSON() {
+        const this$ = this;
+        return Array.from(this$);
+    }
+    GetEnumerator() {
+        const _ = this;
+        return MapTreeModule_mkIEnumerator(_.tree);
+    }
+    [Symbol.iterator]() {
+        return toIterator(getEnumerator(this));
+    }
+    "System.Collections.IEnumerable.GetEnumerator"() {
+        const _ = this;
+        return MapTreeModule_mkIEnumerator(_.tree);
+    }
+    CompareTo(other) {
+        let that = undefined;
+        const this$ = this;
+        return ((other instanceof FSharpMap) ? ((that = other, compareWith((kvp1, kvp2) => {
+            const c = this$.comparer.Compare(kvp1[0], kvp2[0]) | 0;
+            return ((c !== 0) ? c : compare$1(kvp1[1], kvp2[1])) | 0;
+        }, this$, that))) : 1) | 0;
+    }
+    "System.Collections.Generic.ICollection`1.Add2B595"(x) {
+        throw NotSupportedException_$ctor_Z721C83C5("Map cannot be mutated");
+    }
+    "System.Collections.Generic.ICollection`1.Clear"() {
+        throw NotSupportedException_$ctor_Z721C83C5("Map cannot be mutated");
+    }
+    "System.Collections.Generic.ICollection`1.Remove2B595"(x) {
+        throw NotSupportedException_$ctor_Z721C83C5("Map cannot be mutated");
+    }
+    "System.Collections.Generic.ICollection`1.Contains2B595"(x) {
+        const m = this;
+        return FSharpMap__ContainsKey(m, x[0]) && equals$1(FSharpMap__get_Item(m, x[0]), x[1]);
+    }
+    "System.Collections.Generic.ICollection`1.CopyToZ3B4C077E"(arr, i) {
+        const m = this;
+        MapTreeModule_copyToArray(m.tree, arr, i);
+    }
+    "System.Collections.Generic.ICollection`1.get_IsReadOnly"() {
+        return true;
+    }
+    "System.Collections.Generic.ICollection`1.get_Count"() {
+        const m = this;
+        return FSharpMap__get_Count(m) | 0;
+    }
+    "System.Collections.Generic.IReadOnlyCollection`1.get_Count"() {
+        const m = this;
+        return FSharpMap__get_Count(m) | 0;
+    }
+    get size() {
+        const m = this;
+        return FSharpMap__get_Count(m) | 0;
+    }
+    clear() {
+        throw new Exception("Map cannot be mutated");
+    }
+    delete(_arg) {
+        throw new Exception("Map cannot be mutated");
+    }
+    entries() {
+        const m = this;
+        return map$1((p) => [p[0], p[1]], m);
+    }
+    get(k) {
+        const m = this;
+        return FSharpMap__get_Item(m, k);
+    }
+    has(k) {
+        const m = this;
+        return FSharpMap__ContainsKey(m, k);
+    }
+    keys() {
+        const m = this;
+        return map$1((p) => p[0], m);
+    }
+    set(k, v) {
+        throw new Exception("Map cannot be mutated");
+    }
+    values() {
+        const m = this;
+        return map$1((p) => p[1], m);
+    }
+    forEach(f, thisArg) {
+        const m = this;
+        iterate((p) => {
+            f(p[1], p[0], m);
+        }, m);
+    }
+}
+function FSharpMap_$ctor(comparer, tree) {
+    return new FSharpMap(comparer, tree);
+}
+function FSharpMap_Empty(comparer) {
+    return FSharpMap_$ctor(comparer, MapTreeModule_empty());
+}
+function FSharpMap__get_Tree(m) {
+    return m.tree;
+}
+function FSharpMap__Add(m, key, value) {
+    return FSharpMap_$ctor(m.comparer, MapTreeModule_add(m.comparer, key, value, m.tree));
+}
+function FSharpMap__get_Item(m, key) {
+    return MapTreeModule_find(m.comparer, key, m.tree);
+}
+function FSharpMap__get_Count(m) {
+    return MapTreeModule_size(m.tree) | 0;
+}
+function FSharpMap__ContainsKey(m, key) {
+    return MapTreeModule_mem(m.comparer, key, m.tree);
+}
+function FSharpMap__TryFind(m, key) {
+    return MapTreeModule_tryFind(m.comparer, key, m.tree);
+}
+function FSharpMap__ToList(m) {
+    return MapTreeModule_toList(m.tree);
+}
+function FSharpMap__ComputeHashCode(this$) {
+    const combineHash = (x, y) => ((((x << 1) + y) + 631) | 0);
+    let res = 0;
+    const enumerator = getEnumerator(this$);
+    try {
+        while (enumerator["System.Collections.IEnumerator.MoveNext"]()) {
+            const activePatternResult = enumerator["System.Collections.Generic.IEnumerator`1.get_Current"]();
+            res = (combineHash(res, structuralHash(activePatternResult[0])) | 0);
+            res = (combineHash(res, structuralHash(activePatternResult[1])) | 0);
+        }
+    }
+    finally {
+        disposeSafe(enumerator);
+    }
+    return res | 0;
+}
+function add(key, value, table) {
+    return FSharpMap__Add(table, key, value);
+}
+function tryFind(key, table) {
+    return FSharpMap__TryFind(table, key);
+}
+function fold(folder, state, table) {
+    return MapTreeModule_fold(folder, state, FSharpMap__get_Tree(table));
+}
+function ofList(elements, comparer) {
+    return FSharpMap_$ctor(comparer, MapTreeModule_ofSeq(comparer, elements));
+}
+function ofArray(elements, comparer) {
+    return FSharpMap_$ctor(comparer, MapTreeModule_ofSeq(comparer, elements));
+}
+function toList(table) {
+    return FSharpMap__ToList(table);
+}
+function empty(comparer) {
+    return FSharpMap_Empty(comparer);
+}
+
+function JsonValue_JString(stringValue) {
+    return new JsonValue(0, [stringValue]);
+}
+function JsonValue_JInt(intValue) {
+    return new JsonValue(1, [intValue]);
+}
+function JsonValue_JFloat(floatValue) {
+    return new JsonValue(2, [floatValue]);
+}
+function JsonValue_JBool(boolValue) {
+    return new JsonValue(3, [boolValue]);
+}
+function JsonValue_JArray(arrayValue) {
+    return new JsonValue(5, [arrayValue]);
+}
+function JsonValue_JMap(mapValue) {
+    return new JsonValue(6, [mapValue]);
+}
+class JsonValue extends Union {
+    constructor(tag, fields) {
+        super();
+        this.tag = tag;
+        this.fields = fields;
+    }
+    tag;
+    fields;
+    cases() {
+        return ["JString", "JInt", "JFloat", "JBool", "JNull", "JArray", "JMap"];
+    }
+    static JNull = new JsonValue(4, []);
+}
+class FieldError extends Record {
+    path;
+    message;
+    constructor(path, message) {
+        super();
+        this.path = path;
+        this.message = message;
+    }
+}
+function JsonSchemaValue_SVStr(Item) {
+    return new JsonSchemaValue(0, [Item]);
+}
+function JsonSchemaValue_SVList(Item) {
+    return new JsonSchemaValue(4, [Item]);
+}
+function JsonSchemaValue_SVDict(Item) {
+    return new JsonSchemaValue(5, [Item]);
+}
+class JsonSchemaValue extends Union {
+    constructor(tag, fields) {
+        super();
+        this.tag = tag;
+        this.fields = fields;
+    }
+    tag;
+    fields;
+    cases() {
+        return ["SVStr", "SVInt", "SVFloat", "SVBool", "SVList", "SVDict"];
+    }
+}
+const emptySchema = empty({
+    Compare: (x, y) => (comparePrimitives(x, y) | 0),
+});
+const emptyRegistry = empty({
+    Compare: (x, y) => (comparePrimitives(x, y) | 0),
+});
+function tryGetCodecEntry(fullName, registry) {
+    return tryFind(fullName, registry);
+}
+function isOptionType(fullName) {
+    return fullName.startsWith("Microsoft.FSharp.Core.FSharpOption");
+}
+function isFSharpListType(fullName) {
+    return fullName.startsWith("Microsoft.FSharp.Collections.FSharpList");
+}
+function getGenericInnerType(t) {
+    return item(0, getGenerics(t));
+}
+/**
+ * Lazily wrap a backend-native value as a `JsonValue` for hand-off to
+ * user codecs (`IJsonCodec.Decode`). Internal `coerce` never calls this
+ * — it routes through `IJsonBackend.IsX` / `AsX` directly. On Fable
+ * backends each `JString s` etc. is identity (no allocation thanks to
+ * `[<Erase>]` legacy / Fable's representation of struct DUs); on the
+ * .NET shim each call allocates a small DU instance.
+ */
+function toJsonValue(backend, fv) {
+    if (backend.IsString(fv)) {
+        return JsonValue_JString(backend.AsString(fv));
+    }
+    else if (backend.IsInt(fv)) {
+        return JsonValue_JInt(backend.AsInt(fv));
+    }
+    else if (backend.IsFloat(fv)) {
+        return JsonValue_JFloat(backend.AsFloat(fv));
+    }
+    else if (backend.IsBool(fv)) {
+        return JsonValue_JBool(backend.AsBool(fv));
+    }
+    else if (backend.IsNull(fv)) {
+        return JsonValue.JNull;
+    }
+    else if (backend.IsArray(fv)) {
+        return JsonValue_JArray(fv);
+    }
+    else if (backend.IsMap(fv)) {
+        return JsonValue_JMap(fv);
+    }
+    else {
+        return toFail(printf("toJsonValue: unrecognised value of type %s"))("System.Object");
+    }
+}
+/**
+ * Unwrap a `JsonValue` handed back by a user codec's `Encode` into the
+ * backend-native form the encode path builds maps out of. The inverse of
+ * `toJsonValue`, and the encode-side counterpart to `CodecEntry.decode`.
+ *
+ * `JArray` / `JMap` payloads are already backend-native (that is what
+ * `toJsonValue` put in them), so they pass straight through.
+ */
+function fromJsonValue(backend, jv) {
+    switch (jv.tag) {
+        case /* JInt */ 1:
+            return jv.fields[0];
+        case /* JFloat */ 2:
+            return jv.fields[0];
+        case /* JBool */ 3:
+            return jv.fields[0];
+        case /* JNull */ 4:
+            return backend.Null;
+        case /* JArray */ 5:
+            return jv.fields[0];
+        case /* JMap */ 6:
+            return jv.fields[0];
+        default:
+            return jv.fields[0];
+    }
+}
+/**
+ * Render a backend-native value as a short human-readable string for
+ * error messages — replaces the JsonValue pattern match the old
+ * coerce-error path used.
+ */
+function describeValue(backend, fv) {
+    if (backend.IsString(fv)) {
+        const arg = backend.AsString(fv);
+        return toText(printf("string \'%s\'"))(arg);
+    }
+    else if (backend.IsInt(fv)) {
+        const arg_1 = backend.AsInt(fv) | 0;
+        return toText(printf("int %d"))(arg_1);
+    }
+    else if (backend.IsFloat(fv)) {
+        const arg_2 = backend.AsFloat(fv);
+        return toText(printf("float %f"))(arg_2);
+    }
+    else if (backend.IsBool(fv)) {
+        const arg_3 = backend.AsBool(fv);
+        return toText(printf("bool %b"))(arg_3);
+    }
+    else if (backend.IsNull(fv)) {
+        return "null";
+    }
+    else if (backend.IsArray(fv)) {
+        return "array";
+    }
+    else if (backend.IsMap(fv)) {
+        return "map";
+    }
+    else {
+        return "<unknown>";
+    }
+}
+/**
+ * Build a `key -> obj option` lookup over a backend-native JSON map.
+ * One implementation backing both the internal record/union resolvers and
+ * the public adapters — declared ahead of the walker
+ * so the recursive group can reference it.
+ */
+function mapLookup(backend, m, key) {
+    if (backend.ContainsKey(m, key)) {
+        return some(backend.Get(m, key));
+    }
+    else {
+        return undefined;
+    }
+}
+/**
+ * Adapt a Map<string, string> (e.g., ToolCall.input from LLM). Each value
+ * is the raw F# string — `coerce` recognises it via `backend.IsString`
+ * and dispatches into the string-target arm of the giant primitive
+ * pattern (which can also coerce to int / float / bool).
+ */
+function stringMapAdapter(map, key) {
+    const matchValue = tryFind(key, map);
+    if (matchValue == null) {
+        return undefined;
+    }
+    else {
+        return some(value(matchValue));
+    }
+}
+class LookupSource extends Record {
+    Get;
+    AsMap;
+    constructor(Get, AsMap) {
+        super();
+        this.Get = Get;
+        this.AsMap = AsMap;
+    }
+}
+/**
+ * `stringMapAdapter` plus the whole-map face. Values stay raw F# strings —
+ * the same shape `Get` hands out, and what every backend's `IsString` /
+ * `AsString` pair already accepts.
+ */
+function stringMapSource(backend, map) {
+    return new LookupSource((key) => stringMapAdapter(map, key), () => fold((acc, key_1, value) => backend.Put(acc, key_1, value), backend.NewMap(), map));
+}
+
+function validResponse(regexMatch, radix) {
+    const [/*all*/ , sign, prefix, digits] = regexMatch;
+    return {
+        sign: sign || "",
+        prefix: prefix || "",
+        digits,
+        radix,
+    };
+}
+function getRange$1(unsigned, bitsize) {
+    switch (bitsize) {
+        case 8: return unsigned ? [0, 255] : [-128, 127];
+        case 16: return unsigned ? [0, 65535] : [-32768, 32767];
+        case 32: return unsigned ? [0, 4294967295] : [-2147483648, 2147483647];
+        default: throw new Exception("Invalid bit size.");
+    }
+}
+function getInvalidDigits(radix) {
+    switch (radix) {
+        case 2: return /[^0-1]/;
+        case 8: return /[^0-7]/;
+        case 10: return /[^0-9]/;
+        case 16: return /[^0-9a-fA-F]/;
+        default:
+            throw new Exception("Invalid Base.");
+    }
+}
+function getPrefix(radix) {
+    switch (radix) {
+        case 2: return "0b";
+        case 8: return "0o";
+        case 10: return "";
+        case 16: return "0x";
+        default: return "";
+    }
+}
+function getRadix(prefix, style) {
+    {
+        switch (prefix) {
+            case "0b":
+            case "0B": return 2;
+            case "0o":
+            case "0O": return 8;
+            case "0x":
+            case "0X": return 16;
+            default: return 10;
+        }
+    }
+}
+function isValid(str, style, radix) {
+    const integerRegex = /^\s*([\+\-])?(0[xXoObB])?([0-9a-fA-F]+)\s*$/;
+    const res = integerRegex.exec(str.replace(/_/g, ""));
+    if (res != null) {
+        const [/*all*/ , /*sign*/ , prefix, digits] = res;
+        radix = radix || getRadix(prefix);
+        const invalidDigits = getInvalidDigits(radix);
+        if (!invalidDigits.test(digits)) {
+            return validResponse(res, radix);
+        }
+    }
+    return null;
+}
+function parse$3(str, style, unsigned, bitsize, radix) {
+    const res = isValid(str, style, radix);
+    if (res != null) {
+        let v = Number.parseInt(res.sign + res.digits, res.radix);
+        if (!Number.isNaN(v)) {
+            const [umin, umax] = getRange$1(true, bitsize);
+            if (res.radix !== 10 && v >= umin && v <= umax) {
+                v = v << (32 - bitsize) >> (32 - bitsize);
+            }
+            const [min, max] = getRange$1(unsigned, bitsize);
+            if (v >= min && v <= max) {
+                return v;
+            }
+        }
+    }
+    throw new Exception(`The input string ${str} was not in a correct format.`);
+}
+function tryParse$1(str, style, unsigned, bitsize, defValue) {
+    try {
+        defValue.contents = parse$3(str, style, unsigned, bitsize);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+function op_UnaryNegation_Int32(x) {
+    return x === -2147483648 ? x : -x;
+}
+
+function getRange(unsigned, bitsize) {
+    switch (bitsize) {
+        case 64: return unsigned ?
+            [0n, 18446744073709551615n] :
+            [-9223372036854775808n, 9223372036854775807n];
+        default: throw new Exception("Invalid bit size.");
+    }
+}
+function parse$2(str, style, unsigned, bitsize, radix) {
+    const res = isValid(str, style, radix);
+    if (res != null) {
+        let v = fromString(getPrefix(res.radix) + res.digits);
+        if (res.sign === "-") {
+            v = -v;
+        }
+        const [umin, umax] = getRange(true, bitsize);
+        if (res.radix !== 10 && v >= umin && v <= umax) {
+            v = BigInt.asIntN(bitsize, v);
+        }
+        const [min, max] = getRange(unsigned, bitsize);
+        if (v >= min && v <= max) {
+            return v;
+        }
+    }
+    throw new Exception(`The input string ${str} was not in a correct format.`);
+}
+function tryParse(str, style, unsigned, bitsize, defValue) {
+    try {
+        defValue.contents = parse$2(str, style, unsigned, bitsize);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+
+/**
+ * DateTimeOffset functions.
+ *
+ * Note: DateOffset instances are always DateObjects in local
+ * timezone (because JS dates are all kinds of messed up).
+ * A local date returns UTC epoch when `.getTime()` is called.
+ *
+ * However, this means that in order to construct an UTC date
+ * from a DateOffset with offset of +5 hours, you first need
+ * to subtract those 5 hours, than add the "local" offset.
+ * As said, all kinds of messed up.
+ *
+ * Basically; invariant: date.getTime() always return UTC time.
+ */
+function DateTimeOffset(value, offset) {
+    checkOffsetInRange(offset);
+    const d = new Date(value);
+    d.offset = offset != null ? offset : new Date().getTimezoneOffset() * -6e4;
+    return d;
+}
+function checkOffsetInRange(offset) {
+    if (offset != null && offset !== 0) {
+        if (offset % 60_000 !== 0) {
+            throw new Exception("Offset must be specified in whole minutes.");
+        }
+        if (Math.abs(offset / 3600000) > 14) {
+            throw new Exception("Offset must be within plus or minus 14 hours.");
+        }
+    }
+}
+function fromDate(date, offset) {
+    let offset2 = 0;
+    switch (date.kind) {
+        case DateTimeKind.Utc:
+            offset2 = 0;
+            break;
+        case DateTimeKind.Local:
+            offset2 = date.getTimezoneOffset() * -6e4;
+            if (offset !== offset2) {
+                throw new Exception("The UTC Offset of the local dateTime parameter does not match the offset argument.");
+            }
+            break;
+        case DateTimeKind.Unspecified:
+        default:
+            {
+                offset2 = offset;
+            }
+            break;
+    }
+    return DateTimeOffset(date.getTime(), offset2);
+}
+function toUniversalTime(date) {
+    return DateTime(date.getTime(), DateTimeKind.Utc);
+}
+
+// RFC 4122 compliant. From https://stackoverflow.com/a/13653180/3922220
+// const guidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+// Relax GUID parsing, see #1637
+const guidRegex = /^[\(\{]{0,2}[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[\)\}]{0,2}$/;
+const guidRegexNoHyphen = /^([0-9a-f]{8})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{12})$/;
+const guidRegexHex = /^\{0x[0-9a-f]{8},(0x[0-9a-f]{4},){2}\{(0x[0-9a-f]{2},){7}0x[0-9a-f]{2}\}\}$/;
+/** Validates UUID as specified in RFC4122 (versions 1-5). */
+function parse$1(str) {
+    function hyphenateGuid(str) {
+        return str.replace(guidRegexNoHyphen, "$1-$2-$3-$4-$5");
+    }
+    const wsTrimAndLowered = str.trim().toLowerCase();
+    if (guidRegex.test(wsTrimAndLowered)) {
+        return trim(wsTrimAndLowered, "{", "}", "(", ")");
+    }
+    else if (guidRegexNoHyphen.test(wsTrimAndLowered)) {
+        return hyphenateGuid(wsTrimAndLowered);
+    }
+    else if (guidRegexHex.test(wsTrimAndLowered)) {
+        return hyphenateGuid(wsTrimAndLowered.replace(/[\{\},]|0x/g, ''));
+    }
+    else {
+        throw new Exception("Guid should contain 32 digits with 4 dashes: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx");
+    }
+}
+
+/**
+ * Cross-type coercion is intentional and load-bearing: LLM tool calls deliver
+ * every argument as a string, so `"42"` must reach an `int` field.
+ */
+function parseInt$(s) {
+    let matchValue;
+    let outArg = 0;
+    matchValue = [tryParse$1(s, 511, false, 32, new FSharpRef(() => (outArg | 0), (v) => {
+            outArg = (v | 0);
+        })), outArg];
+    if (matchValue[0]) {
+        return FSharpResult$2_Ok(matchValue[1]);
+    }
+    else {
+        return FSharpResult$2_Error$(toText(printf("cannot parse \'%s\' as int"))(s));
+    }
+}
+function parseInt64(s) {
+    let matchValue;
+    let outArg = 0n;
+    matchValue = [tryParse(s, 511, false, 64, new FSharpRef(() => outArg, (v) => {
+            outArg = v;
+        })), outArg];
+    if (matchValue[0]) {
+        return FSharpResult$2_Ok(matchValue[1]);
+    }
+    else {
+        return FSharpResult$2_Error$(toText(printf("cannot parse \'%s\' as int64"))(s));
+    }
+}
+function parseFloat$(s) {
+    let matchValue;
+    let outArg = 0;
+    matchValue = [tryParse$2(s, new FSharpRef(() => outArg, (v) => {
+            outArg = v;
+        })), outArg];
+    if (matchValue[0]) {
+        return FSharpResult$2_Ok(matchValue[1]);
+    }
+    else {
+        return FSharpResult$2_Error$(toText(printf("cannot parse \'%s\' as float"))(s));
+    }
+}
+/**
+ * Accepts only the two JSON literals, case-insensitively. Deliberately not
+ * `"1"` / `"yes"` / `""` — a silent truthiness rule is the wrong default for
+ * validating tool input.
+ */
+function parseBool(s) {
+    const matchValue = s.toLocaleLowerCase();
+    switch (matchValue) {
+        case "true":
+            return FSharpResult$2_Ok(true);
+        case "false":
+            return FSharpResult$2_Ok(false);
+        default:
+            return FSharpResult$2_Error$(toText(printf("cannot parse \'%s\' as bool"))(s));
+    }
+}
+function splitZoneOffset(s) {
+    if (s.length <= 10) {
+        return undefined;
+    }
+    else {
+        const tail = substring(s, 10);
+        const plus = tail.indexOf("+") | 0;
+        const minus = tail.indexOf("-") | 0;
+        const signIndex = (((plus >= 0) && (minus >= 0)) ? min(plus, minus) : ((plus >= 0) ? plus : minus)) | 0;
+        if (signIndex < 0) {
+            return undefined;
+        }
+        else {
+            const offset = substring(tail, signIndex);
+            const digits = replace(substring(offset, 1), ":", "");
+            if (digits.length < 2) {
+                return undefined;
+            }
+            else {
+                const hours = parse$3(substring(digits, 0, 2), 511, false, 32) | 0;
+                const minutes = ((digits.length >= 4) ? parse$3(substring(digits, 2, 2), 511, false, 32) : 0) | 0;
+                const sign = ((offset[0] === "-") ? -1 : 1) | 0;
+                return [substring(s, 0, 10 + signIndex), sign * ((hours * 60) + minutes)];
+            }
+        }
+    }
+}
+function parseAsUtc(s) {
+    let matchValue;
+    let outArg = minValue();
+    matchValue = [tryParse$3(s, new FSharpRef(() => outArg, (v) => {
+            outArg = v;
+        })), outArg];
+    if (matchValue[0]) {
+        return FSharpResult$2_Ok(specifyKind(matchValue[1], 1));
+    }
+    else {
+        return FSharpResult$2_Error$(toText(printf("cannot parse \'%s\' as DateTime"))(s));
+    }
+}
+function parseDateTime(s) {
+    const matchValue = splitZoneOffset(s);
+    if (matchValue == null) {
+        return Result_MapError((_arg) => toText(printf("cannot parse \'%s\' as DateTime"))(s), parseAsUtc((s.endsWith("Z") ? true : s.endsWith("z")) ? substring(s, 0, s.length - 1) : s));
+    }
+    else {
+        const offsetMinutes = value(matchValue)[1] | 0;
+        return Result_Map((d) => addMinutes(d, op_UnaryNegation_Int32(offsetMinutes)), parseAsUtc(value(matchValue)[0]));
+    }
+}
+/**
+ * A `DateTimeOffset` carries its own offset, so nothing has to be assumed about
+ * a bare timestamp — the reason to prefer it over `DateTime` on a wire format.
+ * Built from the UTC instant above rather than `DateTimeOffset.TryParse`, which
+ * is not implemented consistently across the Fable backends.
+ */
+function parseDateTimeOffset(s) {
+    return Result_MapError((_arg) => toText(printf("cannot parse \'%s\' as DateTimeOffset"))(s), Result_Map((utc) => fromDate(utc, 0), parseDateTime(s)));
+}
+/**
+ * `Guid.Parse` guarded, not `TryParse`: the latter's `byref` overload is not
+ * uniformly available across the Fable backends, and a guarded `Parse` is.
+ */
+function parseGuid(s) {
+    try {
+        return FSharpResult$2_Ok(parse$1(s));
+    }
+    catch (matchValue) {
+        return FSharpResult$2_Error$(toText(printf("cannot parse \'%s\' as Guid"))(s));
+    }
+}
+function parseDecimal(s) {
+    let matchValue;
+    let outArg = new Big("0");
+    matchValue = [tryParse$4(s, new FSharpRef(() => outArg, (v) => {
+            outArg = v;
+        })), outArg];
+    if (matchValue[0]) {
+        return FSharpResult$2_Ok(matchValue[1]);
+    }
+    else {
+        return FSharpResult$2_Error$(toText(printf("cannot parse \'%s\' as decimal"))(s));
+    }
+}
+function intToString(n) {
+    return int32ToString(n);
+}
+function floatToString(f) {
+    return f.toString();
+}
+/**
+ * The JSON literals, not .NET's `"True"` / `"False"`.
+ */
+function boolToString(b) {
+    if (b) {
+        return "true";
+    }
+    else {
+        return "false";
+    }
+}
+function dateTimeToString(d) {
+    return toString(toUniversalTime$1(d), "yyyy-MM-ddTHH:mm:ss.fffffff") + "Z";
+}
+/**
+ * Rendered in UTC with the `Z` designator, exactly like `dateTimeToString` —
+ * the offset is preserved as an instant rather than as a local wall clock.
+ */
+function dateTimeOffsetToString(d) {
+    return toString(toUniversalTime(d), "yyyy-MM-ddTHH:mm:ss.fffffff") + "Z";
+}
+/**
+ * Canonical 8-4-4-4-12, lower case — what `format: uuid` denotes.
+ */
+function guidToString(g) {
+    return g;
+}
+function decimalToString(d) {
+    return toString$1(d);
+}
+
+class Plan extends Record {
+    Decode;
+    Encode;
+    Schema;
+    Definitions;
+    constructor(Decode, Encode, Schema, Definitions) {
+        super();
+        this.Decode = Decode;
+        this.Encode = Encode;
+        this.Schema = Schema;
+        this.Definitions = Definitions;
+    }
+}
+class FieldPlan extends Record {
+    Key;
+    Optional;
+    TypeName;
+    Inner;
+    Wrap;
+    Read;
+    constructor(Key, Optional, TypeName, Inner, Wrap, Read) {
+        super();
+        this.Key = Key;
+        this.Optional = Optional;
+        this.TypeName = TypeName;
+        this.Inner = Inner;
+        this.Wrap = Wrap;
+        this.Read = Read;
+    }
+}
+class RecordPlan extends Record {
+    Fields;
+    Make;
+    Title;
+    constructor(Fields, Make, Title) {
+        super();
+        this.Fields = Fields;
+        this.Make = Make;
+        this.Title = Title;
+    }
+}
+class CasePlan extends Record {
+    Tag;
+    Info;
+    Payload;
+    constructor(Tag, Info, Payload) {
+        super();
+        this.Tag = Tag;
+        this.Info = Info;
+        this.Payload = Payload;
+    }
+}
+class BuildCtx extends Record {
+    Backend;
+    Registry;
+    KeyTransform;
+    TagTransform;
+    Building;
+    RefMode;
+    constructor(Backend, Registry, KeyTransform, TagTransform, Building, RefMode) {
+        super();
+        this.Backend = Backend;
+        this.Registry = Registry;
+        this.KeyTransform = KeyTransform;
+        this.TagTransform = TagTransform;
+        this.Building = Building;
+        this.RefMode = RefMode;
+    }
+}
+function joinPath(parent, child) {
+    if (child === "") {
+        return parent;
+    }
+    else if (parent === "") {
+        return child;
+    }
+    else if (child.startsWith("[")) {
+        return parent + child;
+    }
+    else {
+        return (parent + ".") + child;
+    }
+}
+function under(path, errs) {
+    return map((e) => (new FieldError(joinPath(path, e.path), e.message)), errs);
+}
+function leafError(message) {
+    return FSharpResult$2_Error$(singleton$1(new FieldError("", message)));
+}
+function primitiveNode(typeName) {
+    return JsonSchemaValue_SVDict(ofList(singleton$1(["type", JsonSchemaValue_SVStr(typeName)]), {
+        Compare: (x, y) => (comparePrimitives(x, y) | 0),
+    }));
+}
+function formatNode(typeName, format) {
+    return JsonSchemaValue_SVDict(ofList(ofArray$1([["type", JsonSchemaValue_SVStr(typeName)], ["format", JsonSchemaValue_SVStr(format)]]), {
+        Compare: (x, y) => (comparePrimitives(x, y) | 0),
+    }));
+}
+const noDefs = empty({
+    Compare: (x, y) => (comparePrimitives(x, y) | 0),
+});
+function mergeDefs(maps) {
+    return fold$1((acc, m) => fold((a, k, v) => add(k, v, a), acc, m), empty({
+        Compare: (x, y) => (comparePrimitives(x, y) | 0),
+    }), maps);
+}
+function refOrInline(ctx, key, body, childDefs) {
+    const matchValue = ctx.RefMode;
+    if (matchValue == null) {
+        return [body, childDefs];
+    }
+    else {
+        return [JsonSchemaValue_SVDict(ofList(singleton$1(["$ref", JsonSchemaValue_SVStr(value(matchValue) + key)]), {
+                Compare: (x, y) => (comparePrimitives(x, y) | 0),
+            })), add(key, body, childDefs)];
+    }
+}
+const discriminatorKey = "type";
+function forTypeIn(ctx, t) {
+    const fullName$1 = fullName(t);
+    const b = ctx.Backend;
+    switch (fullName$1) {
+        case "System.String":
+            return planString(b);
+        case "System.Int32":
+            return planInt(b);
+        case "System.Int64":
+            return planInt64(b);
+        case "System.Double":
+            return planFloat(b);
+        case "System.Boolean":
+            return planBool(b);
+        default: {
+            const matchValue = tryGetCodecEntry(fullName$1, ctx.Registry);
+            if (matchValue == null) {
+                switch (fullName$1) {
+                    case "System.DateTime":
+                        return planDateTime(b);
+                    case "System.DateTimeOffset":
+                        return planDateTimeOffset(b);
+                    case "System.Guid":
+                        return planGuid(b);
+                    case "System.Decimal":
+                        return planDecimal(b);
+                    default:
+                        if (isFSharpListType(fullName$1)) {
+                            return planSeq(ctx, getGenericInnerType(t), (v_2) => v_2, (_elementType, xs) => xs);
+                        }
+                        else if (isArray(t)) {
+                            return planSeq(ctx, getElementType(t), ofArray$1, (_elementType_2, xs_2) => toArray(xs_2));
+                        }
+                        else if (isRecord(t)) {
+                            if (contains(fullName$1, ctx.Building, {
+                                Equals: (x_1, y) => (x_1 === y),
+                                GetHashCode: (x_1) => (stringHash(x_1) | 0),
+                            })) {
+                                return planDeferred(ctx, t);
+                            }
+                            else {
+                                return planRecord(ctx, t);
+                            }
+                        }
+                        else if (isUnion(t)) {
+                            if (contains(fullName$1, ctx.Building, {
+                                Equals: (x_2, y_1) => (x_2 === y_1),
+                                GetHashCode: (x_2) => (stringHash(x_2) | 0),
+                            })) {
+                                return planDeferred(ctx, t);
+                            }
+                            else {
+                                return planUnion(ctx, t);
+                            }
+                        }
+                        else {
+                            const message = toText(printf("cannot decode %s"))(fullName$1);
+                            return new Plan((_arg) => leafError(message), (x_3) => x_3, JsonSchemaValue_SVDict(emptySchema), noDefs);
+                        }
+                }
+            }
+            else {
+                const entry = value(matchValue);
+                return new Plan((v) => {
+                    const matchValue_1 = entry.decode(toJsonValue(b, v));
+                    return (matchValue_1.tag === /* Error */ 1) ? leafError(matchValue_1.fields[0]) : FSharpResult$2_Ok(matchValue_1.fields[0]);
+                }, (v_1) => fromJsonValue(b, entry.encode(v_1)), JsonSchemaValue_SVDict(entry.schema), noDefs);
+            }
+        }
+    }
+}
+function planString(b) {
+    return new Plan((v) => {
+        let arg = undefined;
+        return b.IsString(v) ? FSharpResult$2_Ok(b.AsString(v)) : (b.IsInt(v) ? FSharpResult$2_Ok(intToString(b.AsInt(v))) : (b.IsFloat(v) ? FSharpResult$2_Ok(floatToString(b.AsFloat(v))) : (b.IsBool(v) ? FSharpResult$2_Ok(boolToString(b.AsBool(v))) : leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.String"))(arg))))));
+    }, (x) => x, primitiveNode("string"), noDefs);
+}
+function planInt(b) {
+    return new Plan((v) => {
+        let arg = undefined;
+        if (b.IsInt(v)) {
+            return FSharpResult$2_Ok(b.AsInt(v));
+        }
+        else if (b.IsFloat(v)) {
+            return FSharpResult$2_Ok(~~b.AsFloat(v));
+        }
+        else if (b.IsString(v)) {
+            const matchValue = parseInt$(b.AsString(v));
+            return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
+        }
+        else {
+            return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Int32"))(arg)));
+        }
+    }, (x) => x, primitiveNode("integer"), noDefs);
+}
+function planInt64(b) {
+    return new Plan((v) => {
+        let arg = undefined;
+        if (b.IsInt(v)) {
+            return FSharpResult$2_Ok(toInt64_unchecked(fromInt32(b.AsInt(v))));
+        }
+        else if (b.IsFloat(v)) {
+            return FSharpResult$2_Ok(toInt64_unchecked(fromFloat64(b.AsFloat(v))));
+        }
+        else if (b.IsString(v)) {
+            const matchValue = parseInt64(b.AsString(v));
+            return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
+        }
+        else {
+            return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Int64"))(arg)));
+        }
+    }, (x) => x, primitiveNode("integer"), noDefs);
+}
+function planFloat(b) {
+    return new Plan((v) => {
+        let arg = undefined;
+        if (b.IsFloat(v)) {
+            return FSharpResult$2_Ok(b.AsFloat(v));
+        }
+        else if (b.IsInt(v)) {
+            return FSharpResult$2_Ok(b.AsInt(v));
+        }
+        else if (b.IsString(v)) {
+            const matchValue = parseFloat$(b.AsString(v));
+            return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
+        }
+        else {
+            return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Double"))(arg)));
+        }
+    }, (x) => x, primitiveNode("number"), noDefs);
+}
+function planBool(b) {
+    return new Plan((v) => {
+        let arg = undefined;
+        if (b.IsBool(v)) {
+            return FSharpResult$2_Ok(b.AsBool(v));
+        }
+        else if (b.IsString(v)) {
+            const matchValue = parseBool(b.AsString(v));
+            return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
+        }
+        else {
+            return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Boolean"))(arg)));
+        }
+    }, (x_1) => x_1, primitiveNode("boolean"), noDefs);
+}
+function planDateTime(b) {
+    return new Plan((v) => {
+        let arg = undefined;
+        if (b.IsString(v)) {
+            const matchValue = parseDateTime(b.AsString(v));
+            return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
+        }
+        else {
+            return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.DateTime"))(arg)));
+        }
+    }, dateTimeToString, formatNode("string", "date-time"), noDefs);
+}
+function planDateTimeOffset(b) {
+    return new Plan((v) => {
+        let arg = undefined;
+        if (b.IsString(v)) {
+            const matchValue = parseDateTimeOffset(b.AsString(v));
+            return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
+        }
+        else {
+            return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.DateTimeOffset"))(arg)));
+        }
+    }, dateTimeOffsetToString, formatNode("string", "date-time"), noDefs);
+}
+function planGuid(b) {
+    return new Plan((v) => {
+        let arg = undefined;
+        if (b.IsString(v)) {
+            const matchValue = parseGuid(b.AsString(v));
+            return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
+        }
+        else {
+            return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Guid"))(arg)));
+        }
+    }, guidToString, formatNode("string", "uuid"), noDefs);
+}
+function planDecimal(b) {
+    return new Plan((v) => {
+        let arg = undefined;
+        if (b.IsString(v)) {
+            const matchValue = parseDecimal(b.AsString(v));
+            return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
+        }
+        else {
+            return b.IsInt(v) ? FSharpResult$2_Ok(new Big(b.AsInt(v))) : (b.IsFloat(v) ? FSharpResult$2_Ok(new Big(b.AsFloat(v))) : leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Decimal"))(arg))));
+        }
+    }, decimalToString, formatNode("string", "decimal"), noDefs);
+}
+function planSeq(ctx, elementType, extract, builder) {
+    const b = ctx.Backend;
+    const element = forTypeIn(ctx, elementType);
+    const build = curry2(builder)(elementType);
+    let expected;
+    const arg = name(elementType);
+    expected = toText(printf("expected JSON array for %s[]"))(arg);
+    return new Plan((v_1) => {
+        if (!b.IsArray(v_1)) {
+            return leafError(expected);
+        }
+        else {
+            const len = b.ArrayLength(v_1) | 0;
+            let i = 0;
+            let failure = undefined;
+            let acc = empty$1();
+            while ((i < len) && (failure == null)) {
+                let arg_1 = undefined;
+                const matchValue = element.Decode(b.ArrayAt(v_1, i));
+                if (matchValue.tag === /* Error */ 1) {
+                    const errs = matchValue.fields[0];
+                    failure = under((arg_1 = (i | 0), toText(printf("[%d]"))(arg_1)), errs);
+                }
+                else {
+                    const x_1 = matchValue.fields[0];
+                    acc = cons(x_1, acc);
+                }
+                i = ((i + 1) | 0);
+            }
+            return (failure == null) ? FSharpResult$2_Ok(build(reverse(acc))) : FSharpResult$2_Error$(value(failure));
+        }
+    }, (v) => {
+        const items = map(element.Encode, extract(v));
+        return b.BuildArray(items);
+    }, JsonSchemaValue_SVDict(ofList(ofArray$1([["type", JsonSchemaValue_SVStr("array")], ["items", element.Schema]]), {
+        Compare: (x, y) => (comparePrimitives(x, y) | 0),
+    })), element.Definitions);
+}
+function buildRecordPlan(ctx, t) {
+    const inner = new BuildCtx(ctx.Backend, ctx.Registry, ctx.KeyTransform, ctx.TagTransform, cons(fullName(t), ctx.Building), ctx.RefMode);
+    return new RecordPlan(map$2((fi) => {
+        const isOpt = isOptionType(fullName(fi[1]));
+        const innerType = isOpt ? getGenericInnerType(fi[1]) : fi[1];
+        return new FieldPlan(ctx.KeyTransform(name(fi)), isOpt, name(innerType), forTypeIn(inner, innerType), isOpt ? (some) : ((x) => x), (record) => getRecordField(record, fi));
+    }, getRecordElements(t)), (values) => makeRecord(t, values), name(t));
+}
+/**
+ * Stage 2 for a record. Every key, option test and type name was resolved at
+ * construction; this indexes arrays and calls closures.
+ *
+ * invariant: all fields are attempted and errors accumulate — not fail-fast
+ */
+function decodeRecordWith(b, rp, lookup) {
+    const n = rp.Fields.length | 0;
+    const values = fill(new Array(n), 0, n, null);
+    let errs = empty$1();
+    for (let i = 0; i <= (n - 1); i++) {
+        let raw = undefined;
+        const f = item(i, rp.Fields);
+        const matchValue = lookup(f.Key);
+        if (matchValue != null) {
+            if ((raw = value(matchValue), b.IsNull(raw))) {
+                value(matchValue);
+                if (f.Optional) {
+                    setItem(values, i, undefined);
+                }
+                else {
+                    errs = cons(new FieldError(f.Key, toText(printf("null where %s was required"))(f.TypeName)), errs);
+                }
+            }
+            else {
+                const raw_2 = value(matchValue);
+                const matchValue_1 = f.Inner.Decode(raw_2);
+                if (matchValue_1.tag === /* Error */ 1) {
+                    const es = matchValue_1.fields[0];
+                    errs = append(reverse(under(f.Key, es)), errs);
+                }
+                else {
+                    const x = matchValue_1.fields[0];
+                    setItem(values, i, f.Wrap(x));
+                }
+            }
+        }
+        else if (f.Optional) {
+            setItem(values, i, undefined);
+        }
+        else {
+            errs = cons(new FieldError(f.Key, toText(printf("missing field (expected %s)"))(f.TypeName)), errs);
+        }
+    }
+    if (isEmpty(errs)) {
+        return FSharpResult$2_Ok(rp.Make(values));
+    }
+    else {
+        return FSharpResult$2_Error$(reverse(errs));
+    }
+}
+/**
+ * Stage 2, encode side. Mirror of `decodeRecordWith`: same field array, same
+ * keys, so the two cannot disagree about what a record looks like on the wire.
+ *
+ * adr: an absent optional field emits no key at all, rather than an explicit null
+ */
+function encodeRecordInto(b, rp, acc0, record) {
+    let acc = acc0;
+    for (let i = 0; i <= (rp.Fields.length - 1); i++) {
+        const f = item(i, rp.Fields);
+        const v = f.Read(record);
+        if (f.Optional) {
+            const matchValue = v;
+            if (matchValue == null) ;
+            else {
+                const inner = value(matchValue);
+                acc = b.Put(acc, f.Key, f.Inner.Encode(inner));
+            }
+        }
+        else {
+            acc = b.Put(acc, f.Key, f.Inner.Encode(v));
+        }
+    }
+    return acc;
+}
+/**
+ * The object schema for a record plan. `properties` reads the same `Key` the
+ * decoder looks up and the encoder writes, so a case rule or alias cannot
+ * apply to two of the three and not the third.
+ *
+ * An optional field contributes its inner type's schema and is simply absent
+ * from `required` — JSON Schema has no separate notion of optionality.
+ */
+function recordSchema(rp) {
+    const properties = ofArray$1(map$2((f) => [f.Key, f.Inner.Schema], rp.Fields));
+    const required = ofArray$1(choose$2((f_1) => {
+        if (f_1.Optional) {
+            return undefined;
+        }
+        else {
+            return JsonSchemaValue_SVStr(f_1.Key);
+        }
+    }, rp.Fields));
+    const baseSchema = ofList(ofArray$1([["type", JsonSchemaValue_SVStr("object")], ["title", JsonSchemaValue_SVStr(rp.Title)], ["properties", JsonSchemaValue_SVDict(ofList(properties, {
+                Compare: (x, y) => (comparePrimitives(x, y) | 0),
+            }))]]), {
+        Compare: (x_1, y_1) => (comparePrimitives(x_1, y_1) | 0),
+    });
+    if (isEmpty(required)) {
+        return baseSchema;
+    }
+    else {
+        return add("required", JsonSchemaValue_SVList(required), baseSchema);
+    }
+}
+function planRecord(ctx, t) {
+    const b = ctx.Backend;
+    const rp = buildRecordPlan(ctx, t);
+    const expected = toText(printf("expected JSON object for %s"))(rp.Title);
+    const childDefs = mergeDefs(ofArray$1(map$2((f) => f.Inner.Definitions, rp.Fields)));
+    const patternInput = refOrInline(ctx, fullName(t), JsonSchemaValue_SVDict(recordSchema(rp)), childDefs);
+    return new Plan((v) => (b.IsMap(v) ? decodeRecordWith(b, rp, (key) => mapLookup(b, v, key)) : leafError(expected)), (v_1) => encodeRecordInto(b, rp, b.NewMap(), v_1), patternInput[0], patternInput[1]);
+}
+function buildCasePlans(ctx, t) {
+    const inner = new BuildCtx(ctx.Backend, ctx.Registry, ctx.KeyTransform, ctx.TagTransform, cons(fullName(t), ctx.Building), ctx.RefMode);
+    return map$2((caseInfo) => {
+        const caseFields = getUnionCaseFields(caseInfo);
+        let payload;
+        const matchValue = caseFields.length | 0;
+        switch (matchValue) {
+            case 0: {
+                payload = undefined;
+                break;
+            }
+            case 1: {
+                const payloadType = item(0, caseFields)[1];
+                if (isRecord(payloadType)) {
+                    payload = buildRecordPlan(inner, payloadType);
+                }
+                else {
+                    const arg = name(caseInfo);
+                    const arg_1 = name(payloadType);
+                    const arg_2 = name(t);
+                    payload = toFail(printf("union case %s has a non-record payload (%s); not supported in v1 — register an IJsonCodec for %s instead"))(arg)(arg_1)(arg_2);
+                }
+                break;
+            }
+            default: {
+                const arg_3 = name(caseInfo);
+                payload = toFail(printf("union case %s has %d positional fields; multi-field cases are not supported in v1"))(arg_3)(matchValue);
+            }
+        }
+        return new CasePlan(ctx.TagTransform(name(caseInfo)), caseInfo, payload);
+    }, getUnionCases(t));
+}
+/**
+ * Decode-side view: wire tag -> case.
+ */
+function casesByTag(cases) {
+    return ofArray(map$2((c) => [c.Tag, c], cases), {
+        Compare: (x, y) => (comparePrimitives(x, y) | 0),
+    });
+}
+function decodeUnionWith(b, cases, typeName, lookup) {
+    let tagValue = undefined;
+    const matchValue = lookup(discriminatorKey);
+    if (matchValue != null) {
+        if ((tagValue = value(matchValue), b.IsString(tagValue))) {
+            const tagValue_1 = value(matchValue);
+            const tag = b.AsString(tagValue_1);
+            const matchValue_1 = tryFind(tag, cases);
+            if (matchValue_1 != null) {
+                const c = value(matchValue_1);
+                const matchValue_2 = c.Payload;
+                if (matchValue_2 != null) {
+                    return Result_Map((payload) => makeUnion(c.Info, [payload]), decodeRecordWith(b, value(matchValue_2), lookup));
+                }
+                else {
+                    return FSharpResult$2_Ok(makeUnion(c.Info, []));
+                }
+            }
+            else {
+                return FSharpResult$2_Error$(singleton$1(new FieldError(discriminatorKey, toText(printf("no case in %s matches discriminator value \'%s\'"))(typeName)(tag))));
+            }
+        }
+        else {
+            return FSharpResult$2_Error$(singleton$1(new FieldError(discriminatorKey, toText(printf("discriminator \'%s\' must be a string"))(discriminatorKey))));
+        }
+    }
+    else {
+        return FSharpResult$2_Error$(singleton$1(new FieldError(discriminatorKey, toText(printf("missing discriminator \'%s\' for %s"))(discriminatorKey)(typeName))));
+    }
+}
+/**
+ * Encode-side view: the value's runtime case tag indexes straight into the
+ * same array decode was built from.
+ *
+ * `caseValues : obj[]` has a different runtime shape per backend — a
+ * process-dict ref on BEAM, a GenericArray on Python, a native array on .NET —
+ * so payload access goes through `ArrayLength` / `ArrayAt`.
+ */
+function encodeUnionWith(b, byTag, t, v) {
+    const patternInput = getUnionFields(v, t);
+    const c = item(patternInput[0].tag, byTag);
+    const acc = b.Put(b.NewMap(), discriminatorKey, c.Tag);
+    const matchValue = c.Payload;
+    if (matchValue != null) {
+        return encodeRecordInto(b, value(matchValue), acc, b.ArrayAt(patternInput[1], 0));
+    }
+    else {
+        return acc;
+    }
+}
+function planUnion(ctx, t) {
+    const b = ctx.Backend;
+    const cases = buildCasePlans(ctx, t);
+    const byTag = casesByTag(cases);
+    const byIndex = sortBy((c) => (c.Info.tag | 0), cases, {
+        Compare: (x, y) => (comparePrimitives(x, y) | 0),
+    });
+    const typeName = name(t);
+    const expected = toText(printf("expected JSON object for %s"))(typeName);
+    const childDefs = mergeDefs(toList$1(delay(() => collect((c_2) => {
+        const matchValue_3 = c_2.Payload;
+        if (matchValue_3 == null) {
+            return empty$2();
+        }
+        else {
+            return ofArray$1(map$2((f) => f.Inner.Definitions, value(matchValue_3).Fields));
+        }
+    }, byIndex))));
+    const body = JsonSchemaValue_SVDict(ofList(ofArray$1([["title", JsonSchemaValue_SVStr(typeName)], ["oneOf", JsonSchemaValue_SVList(toList$1(delay(() => map$1((c_3) => {
+                const c_1 = c_3;
+                const discriminator = ofList(singleton$1([discriminatorKey, JsonSchemaValue_SVDict(ofList(singleton$1(["const", JsonSchemaValue_SVStr(c_1.Tag)]), {
+                        Compare: (x_1, y_1) => (comparePrimitives(x_1, y_1) | 0),
+                    }))]), {
+                    Compare: (x_2, y_2) => (comparePrimitives(x_2, y_2) | 0),
+                });
+                const matchValue = c_1.Payload;
+                if (matchValue != null) {
+                    const payload = recordSchema(value(matchValue));
+                    let properties;
+                    const matchValue_1 = tryFind("properties", payload);
+                    let matchResult = undefined, p = undefined;
+                    if (matchValue_1 != null) {
+                        if (value(matchValue_1).tag === /* SVDict */ 5) {
+                            matchResult = 0;
+                            p = value(matchValue_1).fields[0];
+                        }
+                        else {
+                            matchResult = 1;
+                        }
+                    }
+                    else {
+                        matchResult = 1;
+                    }
+                    switch (matchResult) {
+                        case 0: {
+                            properties = fold((acc, k, v) => add(k, v, acc), discriminator, p);
+                            break;
+                        }
+                        default:
+                            properties = discriminator;
+                    }
+                    let required;
+                    const matchValue_2 = tryFind("required", payload);
+                    let matchResult_1 = undefined, r = undefined;
+                    if (matchValue_2 != null) {
+                        if (value(matchValue_2).tag === /* SVList */ 4) {
+                            matchResult_1 = 0;
+                            r = value(matchValue_2).fields[0];
+                        }
+                        else {
+                            matchResult_1 = 1;
+                        }
+                    }
+                    else {
+                        matchResult_1 = 1;
+                    }
+                    switch (matchResult_1) {
+                        case 0: {
+                            required = cons(JsonSchemaValue_SVStr(discriminatorKey), r);
+                            break;
+                        }
+                        default:
+                            required = singleton$1(JsonSchemaValue_SVStr(discriminatorKey));
+                    }
+                    return JsonSchemaValue_SVDict(ofList(ofArray$1([["type", JsonSchemaValue_SVStr("object")], ["title", JsonSchemaValue_SVStr(name(c_1.Info))], ["properties", JsonSchemaValue_SVDict(properties)], ["required", JsonSchemaValue_SVList(required)]]), {
+                        Compare: (x_4, y_4) => (comparePrimitives(x_4, y_4) | 0),
+                    }));
+                }
+                else {
+                    return JsonSchemaValue_SVDict(ofList(ofArray$1([["type", JsonSchemaValue_SVStr("object")], ["title", JsonSchemaValue_SVStr(name(c_1.Info))], ["properties", JsonSchemaValue_SVDict(discriminator)], ["required", JsonSchemaValue_SVList(singleton$1(JsonSchemaValue_SVStr(discriminatorKey)))]]), {
+                        Compare: (x_3, y_3) => (comparePrimitives(x_3, y_3) | 0),
+                    }));
+                }
+            }, byIndex))))]]), {
+        Compare: (x_5, y_5) => (comparePrimitives(x_5, y_5) | 0),
+    }));
+    const patternInput = refOrInline(ctx, fullName(t), body, childDefs);
+    return new Plan((v_1) => (b.IsMap(v_1) ? decodeUnionWith(b, byTag, typeName, (key) => mapLookup(b, v_1, key)) : leafError(expected)), (v_2) => encodeUnionWith(b, byIndex, t, v_2), patternInput[0], patternInput[1]);
+}
+function planDeferred(ctx, t) {
+    let matchValue = undefined;
+    const restart = new BuildCtx(ctx.Backend, ctx.Registry, ctx.KeyTransform, ctx.TagTransform, empty$1(), ctx.RefMode);
+    return new Plan((v) => forTypeIn(restart, t).Decode(v), (v_1) => forTypeIn(restart, t).Encode(v_1), (matchValue = ctx.RefMode, (matchValue == null) ? JsonSchemaValue_SVDict(ofList(ofArray$1([["type", JsonSchemaValue_SVStr("object")], ["title", JsonSchemaValue_SVStr(name(t))]]), {
+        Compare: (x_1, y_1) => (comparePrimitives(x_1, y_1) | 0),
+    })) : JsonSchemaValue_SVDict(ofList(singleton$1(["$ref", JsonSchemaValue_SVStr(value(matchValue) + fullName(t))]), {
+        Compare: (x, y) => (comparePrimitives(x, y) | 0),
+    }))), noDefs);
+}
+function forType(backend, registry, keyTransform, tagTransform, t) {
+    return forTypeIn(new BuildCtx(backend, registry, keyTransform, tagTransform, empty$1(), undefined), t);
+}
+function forTypeFromLookup(backend, registry, keyTransform, tagTransform, t) {
+    const ctx = new BuildCtx(backend, registry, keyTransform, tagTransform, empty$1(), undefined);
+    const fullName$1 = fullName(t);
+    const keyless = () => {
+        let arg = undefined;
+        const err = singleton$1(new FieldError("", (arg = name(t), toText(printf("auto<%s> requires a record or discriminated-union type"))(arg))));
+        return (_arg) => FSharpResult$2_Error$(err);
+    };
+    if (isFSharpListType(fullName$1) ? true : isArray(t)) {
+        return keyless();
+    }
+    else if (isRecord(t) ? true : isUnion(t)) {
+        const matchValue = tryGetCodecEntry(fullName$1, registry);
+        if (matchValue == null) {
+            if (isRecord(t)) {
+                const rp = buildRecordPlan(ctx, t);
+                return (src_1) => decodeRecordWith(backend, rp, src_1.Get);
+            }
+            else {
+                const cases = casesByTag(buildCasePlans(ctx, t));
+                const typeName = name(t);
+                return (src_2) => decodeUnionWith(backend, cases, typeName, src_2.Get);
+            }
+        }
+        else {
+            const entry = value(matchValue);
+            return (src) => {
+                const matchValue_1 = entry.decode(toJsonValue(backend, src.AsMap()));
+                return (matchValue_1.tag === /* Error */ 1) ? leafError(matchValue_1.fields[0]) : FSharpResult$2_Ok(matchValue_1.fields[0]);
+            };
+        }
+    }
+    else {
+        return keyless();
+    }
+}
+
+function separateUpper(separator, name) {
+    let result = "";
+    for (let i = 0; i <= (name.length - 1); i++) {
+        const c = name[i];
+        if (isUpper(c)) {
+            if (i > 0) {
+                result = (result + separator);
+            }
+            result = (result + c.toLowerCase());
+        }
+        else {
+            result = (result + c);
+        }
+    }
+    return result;
+}
+function toSnakeCase(name) {
+    return separateUpper("_", name);
+}
+function dashify(separator, name) {
+    return separateUpper(separator, name);
+}
+/**
+ * Apply a case rule to a field name.
+ * Reflection reports the F# spelling (`AirTemperature`) on every target, but
+ * the rule still normalizes to a canonical PascalCase form before emitting the
+ * requested casing — so it produces the same output whether it is handed an F#
+ * field name, a snake_case name, or a name already in the target casing.
+ * BEAM reflection reported snake_case before Fable 5.8.1
+ * (fable-compiler/Fable#4766); the normalization keeps that input working too.
+ */
+function applyCaseRule(caseRule, name) {
+    if (caseRule === 0) {
+        return name;
+    }
+    else {
+        const pascal = toCanonicalPascal(name);
+        switch (caseRule) {
+            case 1:
+                return lowerFirst(pascal);
+            case 2:
+                return toSnakeCase(pascal);
+            case 3:
+                return toSnakeCase(pascal).toUpperCase();
+            case 4:
+                return dashify("-", pascal);
+            case 5:
+                return pascal;
+            default:
+                return pascal;
+        }
+    }
+}
+class TypedJson$1 extends Record {
+    decode;
+    encode;
+    decodeWith;
+    encodeWith;
+    decodeStringMap;
+    caseRules;
+    aliases;
+    withCaseRules;
+    withAliases;
+    constructor(decode, encode, decodeWith, encodeWith, decodeStringMap, caseRules, aliases, withCaseRules, withAliases) {
+        super();
+        this.decode = decode;
+        this.encode = encode;
+        this.decodeWith = decodeWith;
+        this.encodeWith = encodeWith;
+        this.decodeStringMap = decodeStringMap;
+        this.caseRules = caseRules;
+        this.aliases = aliases;
+        this.withCaseRules = withCaseRules;
+        this.withAliases = withAliases;
+    }
+}
+/**
+ * Serialize a backend-native value (map, list, primitive) to a JSON string.
+ */
+function Encode_toJson(backend, term) {
+    return backend.Stringify(term);
+}
+/**
+ * Resolve the JSON key for a given F# field name: alias if present,
+ * otherwise the case-rule-derived form. Lookup is keyed by the field's
+ * PascalCase form so the same alias works regardless of how the
+ * backend's reflection presents the name (BEAM lowercases, Python
+ * preserves the F# spelling).
+ */
+function resolveKey(aliases, caseRules, fieldName) {
+    const matchValue = tryFind(applyCaseRule(5, fieldName), aliases);
+    if (matchValue == null) {
+        return applyCaseRule(caseRules, fieldName);
+    }
+    else {
+        return value(matchValue);
+    }
+}
+function buildCodec(backend, registry, typ) {
+    const build = (aliases, caseRules) => {
+        const defaultKeyTransform = (fieldName) => resolveKey(aliases, caseRules, fieldName);
+        const defaultTagTransform = (name) => applyCaseRule(caseRules, name);
+        const defaultPlan = forType(backend, registry, defaultKeyTransform, defaultTagTransform, typ);
+        const defaultLookupDecode = forTypeFromLookup(backend, registry, defaultKeyTransform, defaultTagTransform, typ);
+        const decodeWith = (rules, map_1) => Result_Map((value_1) => value_1, ((rules === caseRules) ? defaultPlan : forType(backend, registry, (fieldName_1) => resolveKey(aliases, rules, fieldName_1), (name_1) => applyCaseRule(rules, name_1), typ)).Decode(map_1));
+        const encodeWith = (rules_1, record) => Encode_toJson(backend, ((rules_1 === caseRules) ? defaultPlan : forType(backend, registry, (fieldName_2) => resolveKey(aliases, rules_1, fieldName_2), (name_2) => applyCaseRule(rules_1, name_2), typ)).Encode(record));
+        return new TypedJson$1(curry2(decodeWith)(caseRules), curry2(encodeWith)(caseRules), decodeWith, encodeWith, (map) => Result_Map((value) => value, defaultLookupDecode(stringMapSource(backend, map))), caseRules, aliases, (newRules) => build(aliases, newRules), (newAliases) => build(newAliases, caseRules));
+    };
+    return build(empty({
+        Compare: (x, y) => (comparePrimitives(x, y) | 0),
+    }), 1);
+}
+
+class JSBackendImpl {
+    constructor() {
+    }
+    NewMap() {
+        return {};
+    }
+    ContainsKey(map, key) {
+        return key in map;
+    }
+    Get(map, key) {
+        return map[key];
+    }
+    Put(map, key, value) {
+        return (map[key] = value, map);
+    }
+    ParseRaw(json) {
+        return JSON.parse(json);
+    }
+    Stringify(value) {
+        return JSON.stringify(value);
+    }
+    IsString(value) {
+        return (typeof value) === "string";
+    }
+    IsInt(value) {
+        return ((typeof value) === "number") && (Number.isInteger(value));
+    }
+    IsFloat(value) {
+        return ((typeof value) === "number") && !(Number.isInteger(value));
+    }
+    IsBool(value) {
+        return (typeof value) === "boolean";
+    }
+    IsNull(value) {
+        return Operators_IsNull(value);
+    }
+    IsArray(value) {
+        return Array.isArray(value);
+    }
+    IsMap(value) {
+        return (((typeof value) === "object") && !Operators_IsNull(value)) && !Array.isArray(value);
+    }
+    AsString(value) {
+        return value;
+    }
+    AsInt(value) {
+        return value | 0;
+    }
+    AsFloat(value) {
+        return value;
+    }
+    AsBool(value) {
+        return value;
+    }
+    ArrayLength(arr) {
+        return arr.length | 0;
+    }
+    ArrayAt(arr, i) {
+        return arr[i];
+    }
+    BuildArray(items) {
+        return toArray(items);
+    }
+    get Null() {
+        return defaultOf();
+    }
+}
+function JSBackendImpl_$ctor() {
+    return new JSBackendImpl();
+}
+const js$1 = JSBackendImpl_$ctor();
+
+const js = js$1;
+/**
+ * Parse a JSON string into the backend's native map representation.
+ * Equivalent to `js.ParseRaw json`; provided for convenience.
+ */
+function parseRaw(json) {
+    return js.ParseRaw(json);
+}
+
 class Repository extends Record {
     Owner;
     Name;
@@ -32567,18 +35020,7 @@ class VersionChange extends Record {
 function VersionChange_$reflection() {
     return record_type("PaketaBot.VersionChange", [], VersionChange, () => [["Name", string_type], ["Previous", string_type], ["Current", string_type]]);
 }
-class RunnerRequest extends Record {
-    Repository;
-    BaseSha;
-    ArtifactPath;
-    constructor(Repository, BaseSha, ArtifactPath) {
-        super();
-        this.Repository = Repository;
-        this.BaseSha = BaseSha;
-        this.ArtifactPath = ArtifactPath;
-    }
-}
-class RunnerStatus extends Union {
+class ResolutionStatus extends Union {
     constructor(tag, fields) {
         super();
         this.tag = tag;
@@ -32589,15 +35031,15 @@ class RunnerStatus extends Union {
     cases() {
         return ["NoChange", "Updated", "Rejected", "Failed"];
     }
-    static NoChange = new RunnerStatus(0, []);
-    static Updated = new RunnerStatus(1, []);
-    static Rejected = new RunnerStatus(2, []);
-    static Failed = new RunnerStatus(3, []);
+    static NoChange = new ResolutionStatus(0, []);
+    static Updated = new ResolutionStatus(1, []);
+    static Rejected = new ResolutionStatus(2, []);
+    static Failed = new ResolutionStatus(3, []);
 }
-function RunnerStatus_$reflection() {
-    return union_type("PaketaBot.RunnerStatus", [], RunnerStatus, () => [[], [], [], []]);
+function ResolutionStatus_$reflection() {
+    return union_type("PaketaBot.ResolutionStatus", [], ResolutionStatus, () => [[], [], [], []]);
 }
-class RunnerResult extends Record {
+class ResolutionResult extends Record {
     Status;
     LockFile;
     Changes;
@@ -32610,8 +35052,22 @@ class RunnerResult extends Record {
         this.Messages = Messages;
     }
 }
-function RunnerResult_$reflection() {
-    return record_type("PaketaBot.RunnerResult", [], RunnerResult, () => [["Status", RunnerStatus_$reflection()], ["LockFile", option_type(string_type)], ["Changes", list_type(VersionChange_$reflection())], ["Messages", list_type(string_type)]]);
+function ResolutionResult_$reflection() {
+    return record_type("PaketaBot.ResolutionResult", [], ResolutionResult, () => [["Status", ResolutionStatus_$reflection()], ["LockFile", option_type(string_type)], ["Changes", list_type(VersionChange_$reflection())], ["Messages", list_type(string_type)]]);
+}
+class ResolutionArtifact extends Record {
+    Repository;
+    BaseSha;
+    Result;
+    constructor(Repository, BaseSha, Result) {
+        super();
+        this.Repository = Repository;
+        this.BaseSha = BaseSha;
+        this.Result = Result;
+    }
+}
+function ResolutionArtifact_$reflection() {
+    return record_type("PaketaBot.ResolutionArtifact", [], ResolutionArtifact, () => [["Repository", string_type], ["BaseSha", string_type], ["Result", ResolutionResult_$reflection()]]);
 }
 class Publication extends Record {
     Branch;
@@ -32664,6 +35120,79 @@ class UpdateOutcome extends Union {
     }
     static Unchanged = new UpdateOutcome(1, []);
 }
+class ActionOperation extends Union {
+    constructor(tag, fields) {
+        super();
+        this.tag = tag;
+        this.fields = fields;
+    }
+    tag;
+    fields;
+    cases() {
+        return ["ResolveOperation", "PublishOperation"];
+    }
+    static ResolveOperation = new ActionOperation(0, []);
+    static PublishOperation = new ActionOperation(1, []);
+}
+function ActionOperationModule_parse(value) {
+    const matchValue = value.trim().toLowerCase();
+    switch (matchValue) {
+        case "resolve":
+            return FSharpResult$2_Ok(ActionOperation.ResolveOperation);
+        case "publish":
+            return FSharpResult$2_Ok(ActionOperation.PublishOperation);
+        default:
+            return FSharpResult$2_Error$("the operation input must be resolve or publish");
+    }
+}
+/**
+ * Enforce the credential contract before either Action operation starts.
+ *
+ * decision: makes token absence an executable resolver precondition in addition to the separate-job workflow boundary
+ * invariant: resolve rejects a supplied publisher token and publish rejects a missing publisher token
+ */
+function ActionOperationModule_validateToken(operation, hasToken) {
+    let matchResult = undefined;
+    if (operation.tag === /* PublishOperation */ 1) {
+        if (hasToken) {
+            matchResult = 0;
+        }
+        else {
+            matchResult = 2;
+        }
+    }
+    else if (hasToken) {
+        matchResult = 1;
+    }
+    else {
+        matchResult = 0;
+    }
+    switch (matchResult) {
+        case 0:
+            return FSharpResult$2_Ok(undefined);
+        case 1:
+            return FSharpResult$2_Error$("the resolve operation must not receive a GitHub token");
+        default:
+            return FSharpResult$2_Error$("the publish operation requires a GitHub token");
+    }
+}
+/**
+ * Bind a downloaded resolution artifact to the caller repository and event revision.
+ *
+ * decision: carries repository and SHA through the artifact because jobs do not share process state
+ * invariant: publication rejects an artifact created for another repository or revision
+ */
+function ResolutionArtifacts_validate(expectedRepository, expectedSha, artifact) {
+    if (!(compare(artifact.Repository, expectedRepository, 4) === 0)) {
+        return FSharpResult$2_Error$("the resolution artifact belongs to another repository");
+    }
+    else if (!(compare(artifact.BaseSha, expectedSha, 4) === 0)) {
+        return FSharpResult$2_Error$("the resolution artifact belongs to another revision");
+    }
+    else {
+        return FSharpResult$2_Ok(undefined);
+    }
+}
 function PullRequests_isTrackedBody(body) {
     if (!Operators_IsNull(body)) {
         return contains$1(body, "<!-- paketabot:weekly -->");
@@ -32689,22 +35218,27 @@ function PullRequests_isOwnedBy(expectedAuthor, actualAuthor, body) {
 function PaketFiles_isLock(path) {
     return compare(path, "paket.lock", 4) === 0;
 }
+function Checkouts_validateRevision(eventSha, resolvedSha) {
+    if (compare(eventSha, resolvedSha, 4) === 0) {
+        return FSharpResult$2_Ok(undefined);
+    }
+    else {
+        return FSharpResult$2_Error$("the resolved commit does not match GITHUB_SHA");
+    }
+}
 /**
- * Require Action execution to use the event's exact default-branch revision.
+ * Require publication to use the event's exact default-branch resolution.
  *
  * decision: rejects non-default manual-dispatch refs so the pull request tree always derives from its declared base branch
- * invariant: the archived checkout SHA equals GITHUB_SHA and GITHUB_REF names the repository default branch
+ * invariant: the resolved SHA equals GITHUB_SHA and GITHUB_REF names the repository default branch
  */
-function Checkouts_validate(defaultBranch, eventRef, eventSha, checkoutSha) {
+function Checkouts_validate(defaultBranch, eventRef, eventSha, resolvedSha) {
     const expectedRef = `refs/heads/${defaultBranch}`;
     if (!(compare(eventRef, expectedRef, 4) === 0)) {
         return FSharpResult$2_Error$(concat$1("PaketaBot must run from the default branch (", expectedRef, ")"));
     }
-    else if (!(compare(eventSha, checkoutSha, 4) === 0)) {
-        return FSharpResult$2_Error$("the checked-out commit does not match GITHUB_SHA");
-    }
     else {
-        return FSharpResult$2_Ok(undefined);
+        return Checkouts_validateRevision(eventSha, resolvedSha);
     }
 }
 /**
@@ -32760,44 +35294,1683 @@ function Branches_planPublication(baseSha, expectedHead, currentHead) {
     }
 }
 
-function emptyContinuation(_x) {
-    // NOP
+const resolutionArtifact = buildCodec(js, emptyRegistry, ResolutionArtifact_$reflection());
+function encodeArtifact(value) {
+    return resolutionArtifact.encode(value);
 }
-function awaitPromise(p) {
-    return fromContinuations((conts) => p.then(conts[0]).catch((err) => (err instanceof OperationCanceledException
-        ? conts[2] : conts[1])(err)));
+function decodeArtifact(json) {
+    return resolutionArtifact.decode(parseRaw(json));
 }
-const defaultCancellationToken = new CancellationToken();
-function catchAsync(work) {
-    return protectedCont((ctx) => {
-        work({
-            onSuccess: (x) => ctx.onSuccess(Choice_makeChoice1Of2(x)),
-            onError: (ex) => ctx.onSuccess(Choice_makeChoice2Of2(ex)),
-            onCancel: ctx.onCancel,
-            cancelToken: ctx.cancelToken,
-            trampoline: ctx.trampoline,
-        });
+
+function tryGetValue(map, key, defaultValue) {
+    if (map.has(key)) {
+        defaultValue.contents = map.get(key);
+        return true;
+    }
+    return false;
+}
+function addToSet(v, set) {
+    if (set.has(v)) {
+        return false;
+    }
+    set.add(v);
+    return true;
+}
+function getItemFromDict(map, key) {
+    if (map.has(key)) {
+        return map.get(key);
+    }
+    else {
+        throw new Exception(`The given key '${key}' was not present in the dictionary.`);
+    }
+}
+
+class HashSet {
+    comparer;
+    hashMap;
+    "init@9";
+    constructor(items, comparer) {
+        const this$ = new FSharpRef(defaultOf());
+        this.comparer = comparer;
+        this$.contents = this;
+        this.hashMap = (new Map([]));
+        this["init@9"] = 1;
+        const enumerator = getEnumerator(items);
+        try {
+            while (enumerator["System.Collections.IEnumerator.MoveNext"]()) {
+                const item = enumerator["System.Collections.Generic.IEnumerator`1.get_Current"]();
+                HashSet__Add_2B595(this$.contents, item);
+            }
+        }
+        finally {
+            disposeSafe(enumerator);
+        }
+    }
+    get [Symbol.toStringTag]() {
+        return "HashSet";
+    }
+    toJSON() {
+        const this$ = this;
+        return Array.from(this$);
+    }
+    "System.Collections.IEnumerable.GetEnumerator"() {
+        const this$ = this;
+        return getEnumerator(this$);
+    }
+    GetEnumerator() {
+        const this$ = this;
+        return getEnumerator(concat(this$.hashMap.values()));
+    }
+    [Symbol.iterator]() {
+        return toIterator(getEnumerator(this));
+    }
+    "System.Collections.Generic.ICollection`1.Add2B595"(item) {
+        const this$ = this;
+        HashSet__Add_2B595(this$, item);
+    }
+    "System.Collections.Generic.ICollection`1.Clear"() {
+        const this$ = this;
+        HashSet__Clear(this$);
+    }
+    "System.Collections.Generic.ICollection`1.Contains2B595"(item) {
+        const this$ = this;
+        return HashSet__Contains_2B595(this$, item);
+    }
+    "System.Collections.Generic.ICollection`1.CopyToZ3B4C077E"(array, arrayIndex) {
+        const this$ = this;
+        iterateIndexed((i, e) => {
+            setItem(array, arrayIndex + i, e);
+        }, this$);
+    }
+    "System.Collections.Generic.ICollection`1.get_Count"() {
+        const this$ = this;
+        return HashSet__get_Count(this$) | 0;
+    }
+    "System.Collections.Generic.ICollection`1.get_IsReadOnly"() {
+        return false;
+    }
+    "System.Collections.Generic.ICollection`1.Remove2B595"(item) {
+        const this$ = this;
+        return HashSet__Remove_2B595(this$, item);
+    }
+    get size() {
+        const this$ = this;
+        return HashSet__get_Count(this$) | 0;
+    }
+    add(k) {
+        const this$ = this;
+        HashSet__Add_2B595(this$, k);
+        return this$;
+    }
+    clear() {
+        const this$ = this;
+        HashSet__Clear(this$);
+    }
+    delete(k) {
+        const this$ = this;
+        return HashSet__Remove_2B595(this$, k);
+    }
+    has(k) {
+        const this$ = this;
+        return HashSet__Contains_2B595(this$, k);
+    }
+    keys() {
+        const this$ = this;
+        return map$1((x) => x, this$);
+    }
+    values() {
+        const this$ = this;
+        return map$1((x) => x, this$);
+    }
+    entries() {
+        const this$ = this;
+        return map$1((v) => [v, v], this$);
+    }
+    forEach(f, thisArg) {
+        const this$ = this;
+        iterate((x) => {
+            f(x, x, this$);
+        }, this$);
+    }
+}
+function HashSet__TryFindIndex_2B595(this$, k) {
+    const h = this$.comparer.GetHashCode(k) | 0;
+    let matchValue;
+    let outArg = defaultOf();
+    matchValue = [tryGetValue(this$.hashMap, h, new FSharpRef(() => outArg, (v) => {
+            outArg = v;
+        })), outArg];
+    if (matchValue[0]) {
+        return [true, h, matchValue[1].findIndex((v_1) => this$.comparer.Equals(k, v_1))];
+    }
+    else {
+        return [false, h, -1];
+    }
+}
+function HashSet__Clear(this$) {
+    this$.hashMap.clear();
+}
+function HashSet__get_Count(this$) {
+    let count = 0;
+    let enumerator = getEnumerator(this$.hashMap.values());
+    try {
+        while (enumerator["System.Collections.IEnumerator.MoveNext"]()) {
+            const items = enumerator["System.Collections.Generic.IEnumerator`1.get_Current"]();
+            count = ((count + items.length) | 0);
+        }
+    }
+    finally {
+        disposeSafe(enumerator);
+    }
+    return count | 0;
+}
+function HashSet__Add_2B595(this$, k) {
+    const matchValue = HashSet__TryFindIndex_2B595(this$, k);
+    if (matchValue[0]) {
+        if (matchValue[2] > -1) {
+            return false;
+        }
+        else {
+            void (getItemFromDict(this$.hashMap, matchValue[1]).push(k));
+            return true;
+        }
+    }
+    else {
+        this$.hashMap.set(matchValue[1], [k]);
+        return true;
+    }
+}
+function HashSet__Contains_2B595(this$, k) {
+    const matchValue = HashSet__TryFindIndex_2B595(this$, k);
+    let matchResult = undefined;
+    if (matchValue[0]) {
+        if (matchValue[2] > -1) {
+            matchResult = 0;
+        }
+        else {
+            matchResult = 1;
+        }
+    }
+    else {
+        matchResult = 1;
+    }
+    switch (matchResult) {
+        case 0:
+            return true;
+        default:
+            return false;
+    }
+}
+function HashSet__Remove_2B595(this$, k) {
+    const matchValue = HashSet__TryFindIndex_2B595(this$, k);
+    let matchResult = undefined;
+    if (matchValue[0]) {
+        if (matchValue[2] > -1) {
+            matchResult = 0;
+        }
+        else {
+            matchResult = 1;
+        }
+    }
+    else {
+        matchResult = 1;
+    }
+    switch (matchResult) {
+        case 0: {
+            getItemFromDict(this$.hashMap, matchValue[1]).splice(matchValue[2], 1);
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
+class SetTreeLeaf$1 {
+    k;
+    constructor(k) {
+        this.k = k;
+    }
+}
+function SetTreeLeaf$1_$ctor_2B595(k) {
+    return new SetTreeLeaf$1(k);
+}
+function SetTreeLeaf$1__get_Key(_) {
+    return _.k;
+}
+class SetTreeNode$1 extends SetTreeLeaf$1 {
+    right;
+    left;
+    h;
+    constructor(v, left, right, h) {
+        super(v);
+        this.left = left;
+        this.right = right;
+        this.h = (h | 0);
+    }
+}
+function SetTreeNode$1_$ctor_5F465FC9(v, left, right, h) {
+    return new SetTreeNode$1(v, left, right, h);
+}
+function SetTreeNode$1__get_Left(_) {
+    return _.left;
+}
+function SetTreeNode$1__get_Right(_) {
+    return _.right;
+}
+function SetTreeNode$1__get_Height(_) {
+    return _.h | 0;
+}
+function SetTreeModule_empty() {
+    return undefined;
+}
+function SetTreeModule_countAux(t_mut, acc_mut) {
+    SetTreeModule_countAux: while (true) {
+        const t = t_mut, acc = acc_mut;
+        if (t != null) {
+            const t2 = value(t);
+            if (t2 instanceof SetTreeNode$1) {
+                const tn = t2;
+                t_mut = SetTreeNode$1__get_Left(tn);
+                acc_mut = SetTreeModule_countAux(SetTreeNode$1__get_Right(tn), acc + 1);
+                continue SetTreeModule_countAux;
+            }
+            else {
+                return (acc + 1) | 0;
+            }
+        }
+        else {
+            return acc | 0;
+        }
+    }
+}
+function SetTreeModule_count(s) {
+    return SetTreeModule_countAux(s, 0) | 0;
+}
+function SetTreeModule_mk(l, k, r) {
+    let tn = undefined, tn_1 = undefined;
+    let hl;
+    const t = l;
+    if (t != null) {
+        const t2 = value(t);
+        hl = ((t2 instanceof SetTreeNode$1) ? ((tn = t2, SetTreeNode$1__get_Height(tn))) : 1);
+    }
+    else {
+        hl = 0;
+    }
+    let hr;
+    const t_1 = r;
+    if (t_1 != null) {
+        const t2_1 = value(t_1);
+        hr = ((t2_1 instanceof SetTreeNode$1) ? ((tn_1 = t2_1, SetTreeNode$1__get_Height(tn_1))) : 1);
+    }
+    else {
+        hr = 0;
+    }
+    const m = ((hl < hr) ? hr : hl) | 0;
+    if (m === 0) {
+        return SetTreeLeaf$1_$ctor_2B595(k);
+    }
+    else {
+        return SetTreeNode$1_$ctor_5F465FC9(k, l, r, m + 1);
+    }
+}
+function SetTreeModule_rebalance(t1, v, t2) {
+    let tn = undefined, tn_1 = undefined, t_2 = undefined, t2_3 = undefined, tn_2 = undefined, t_3 = undefined, t2_4 = undefined, tn_3 = undefined;
+    let t1h;
+    const t = t1;
+    if (t != null) {
+        const t2_1 = value(t);
+        t1h = ((t2_1 instanceof SetTreeNode$1) ? ((tn = t2_1, SetTreeNode$1__get_Height(tn))) : 1);
+    }
+    else {
+        t1h = 0;
+    }
+    let t2h;
+    const t_1 = t2;
+    if (t_1 != null) {
+        const t2_2 = value(t_1);
+        t2h = ((t2_2 instanceof SetTreeNode$1) ? ((tn_1 = t2_2, SetTreeNode$1__get_Height(tn_1))) : 1);
+    }
+    else {
+        t2h = 0;
+    }
+    if (t2h > (t1h + 2)) {
+        const matchValue = value(t2);
+        if (matchValue instanceof SetTreeNode$1) {
+            const t2$0027 = matchValue;
+            if (((t_2 = SetTreeNode$1__get_Left(t2$0027), (t_2 != null) ? ((t2_3 = value(t_2), (t2_3 instanceof SetTreeNode$1) ? ((tn_2 = t2_3, SetTreeNode$1__get_Height(tn_2))) : 1)) : 0)) > (t1h + 1)) {
+                const matchValue_1 = value(SetTreeNode$1__get_Left(t2$0027));
+                if (matchValue_1 instanceof SetTreeNode$1) {
+                    const t2l = matchValue_1;
+                    return SetTreeModule_mk(SetTreeModule_mk(t1, v, SetTreeNode$1__get_Left(t2l)), SetTreeLeaf$1__get_Key(t2l), SetTreeModule_mk(SetTreeNode$1__get_Right(t2l), SetTreeLeaf$1__get_Key(t2$0027), SetTreeNode$1__get_Right(t2$0027)));
+                }
+                else {
+                    throw new Exception("internal error: Set.rebalance");
+                }
+            }
+            else {
+                return SetTreeModule_mk(SetTreeModule_mk(t1, v, SetTreeNode$1__get_Left(t2$0027)), SetTreeLeaf$1__get_Key(t2$0027), SetTreeNode$1__get_Right(t2$0027));
+            }
+        }
+        else {
+            throw new Exception("internal error: Set.rebalance");
+        }
+    }
+    else if (t1h > (t2h + 2)) {
+        const matchValue_2 = value(t1);
+        if (matchValue_2 instanceof SetTreeNode$1) {
+            const t1$0027 = matchValue_2;
+            if (((t_3 = SetTreeNode$1__get_Right(t1$0027), (t_3 != null) ? ((t2_4 = value(t_3), (t2_4 instanceof SetTreeNode$1) ? ((tn_3 = t2_4, SetTreeNode$1__get_Height(tn_3))) : 1)) : 0)) > (t2h + 1)) {
+                const matchValue_3 = value(SetTreeNode$1__get_Right(t1$0027));
+                if (matchValue_3 instanceof SetTreeNode$1) {
+                    const t1r = matchValue_3;
+                    return SetTreeModule_mk(SetTreeModule_mk(SetTreeNode$1__get_Left(t1$0027), SetTreeLeaf$1__get_Key(t1$0027), SetTreeNode$1__get_Left(t1r)), SetTreeLeaf$1__get_Key(t1r), SetTreeModule_mk(SetTreeNode$1__get_Right(t1r), v, t2));
+                }
+                else {
+                    throw new Exception("internal error: Set.rebalance");
+                }
+            }
+            else {
+                return SetTreeModule_mk(SetTreeNode$1__get_Left(t1$0027), SetTreeLeaf$1__get_Key(t1$0027), SetTreeModule_mk(SetTreeNode$1__get_Right(t1$0027), v, t2));
+            }
+        }
+        else {
+            throw new Exception("internal error: Set.rebalance");
+        }
+    }
+    else {
+        return SetTreeModule_mk(t1, v, t2);
+    }
+}
+function SetTreeModule_add(comparer, k, t) {
+    if (t != null) {
+        const t2 = value(t);
+        const c = comparer.Compare(k, SetTreeLeaf$1__get_Key(t2)) | 0;
+        if (t2 instanceof SetTreeNode$1) {
+            const tn = t2;
+            if (c < 0) {
+                return SetTreeModule_rebalance(SetTreeModule_add(comparer, k, SetTreeNode$1__get_Left(tn)), SetTreeLeaf$1__get_Key(tn), SetTreeNode$1__get_Right(tn));
+            }
+            else if (c === 0) {
+                return t;
+            }
+            else {
+                return SetTreeModule_rebalance(SetTreeNode$1__get_Left(tn), SetTreeLeaf$1__get_Key(tn), SetTreeModule_add(comparer, k, SetTreeNode$1__get_Right(tn)));
+            }
+        }
+        else {
+            const c_1 = comparer.Compare(k, SetTreeLeaf$1__get_Key(t2)) | 0;
+            if (c_1 < 0) {
+                return SetTreeNode$1_$ctor_5F465FC9(k, SetTreeModule_empty(), t, 2);
+            }
+            else if (c_1 === 0) {
+                return t;
+            }
+            else {
+                return SetTreeNode$1_$ctor_5F465FC9(k, t, SetTreeModule_empty(), 2);
+            }
+        }
+    }
+    else {
+        return SetTreeLeaf$1_$ctor_2B595(k);
+    }
+}
+function SetTreeModule_mem(comparer_mut, k_mut, t_mut) {
+    SetTreeModule_mem: while (true) {
+        const comparer = comparer_mut, k = k_mut, t = t_mut;
+        if (t != null) {
+            const t2 = value(t);
+            const c = comparer.Compare(k, SetTreeLeaf$1__get_Key(t2)) | 0;
+            if (t2 instanceof SetTreeNode$1) {
+                const tn = t2;
+                if (c < 0) {
+                    comparer_mut = comparer;
+                    k_mut = k;
+                    t_mut = SetTreeNode$1__get_Left(tn);
+                    continue SetTreeModule_mem;
+                }
+                else if (c === 0) {
+                    return true;
+                }
+                else {
+                    comparer_mut = comparer;
+                    k_mut = k;
+                    t_mut = SetTreeNode$1__get_Right(tn);
+                    continue SetTreeModule_mem;
+                }
+            }
+            else {
+                return c === 0;
+            }
+        }
+        else {
+            return false;
+        }
+    }
+}
+function SetTreeModule_iter(f_mut, t_mut) {
+    SetTreeModule_iter: while (true) {
+        const f = f_mut, t = t_mut;
+        if (t != null) {
+            const t2 = value(t);
+            if (t2 instanceof SetTreeNode$1) {
+                const tn = t2;
+                SetTreeModule_iter(f, SetTreeNode$1__get_Left(tn));
+                f(SetTreeLeaf$1__get_Key(tn));
+                f_mut = f;
+                t_mut = SetTreeNode$1__get_Right(tn);
+                continue SetTreeModule_iter;
+            }
+            else {
+                f(SetTreeLeaf$1__get_Key(t2));
+            }
+        }
+        break;
+    }
+}
+class SetTreeModule_SetIterator$1 extends Record {
+    stack;
+    started;
+    constructor(stack, started) {
+        super();
+        this.stack = stack;
+        this.started = started;
+    }
+}
+function SetTreeModule_collapseLHS(stack_mut) {
+    SetTreeModule_collapseLHS: while (true) {
+        const stack = stack_mut;
+        if (!isEmpty(stack)) {
+            const x = head(stack);
+            const rest = tail(stack);
+            if (x != null) {
+                const x2 = value(x);
+                if (x2 instanceof SetTreeNode$1) {
+                    const xn = x2;
+                    stack_mut = ofArrayWithTail([SetTreeNode$1__get_Left(xn), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(xn)), SetTreeNode$1__get_Right(xn)], rest);
+                    continue SetTreeModule_collapseLHS;
+                }
+                else {
+                    return stack;
+                }
+            }
+            else {
+                stack_mut = rest;
+                continue SetTreeModule_collapseLHS;
+            }
+        }
+        else {
+            return empty$1();
+        }
+    }
+}
+function SetTreeModule_mkIterator(s) {
+    return new SetTreeModule_SetIterator$1(SetTreeModule_collapseLHS(singleton$1(s)), false);
+}
+function SetTreeModule_notStarted() {
+    throw new Exception("Enumeration not started");
+}
+function SetTreeModule_alreadyFinished() {
+    throw new Exception("Enumeration already started");
+}
+function SetTreeModule_current(i) {
+    if (i.started) {
+        const matchValue = i.stack;
+        if (isEmpty(matchValue)) {
+            return SetTreeModule_alreadyFinished();
+        }
+        else if (head(matchValue) != null) {
+            const t = value(head(matchValue));
+            return SetTreeLeaf$1__get_Key(t);
+        }
+        else {
+            throw new Exception("Please report error: Set iterator, unexpected stack for current");
+        }
+    }
+    else {
+        return SetTreeModule_notStarted();
+    }
+}
+function SetTreeModule_moveNext(i) {
+    if (i.started) {
+        const matchValue = i.stack;
+        if (!isEmpty(matchValue)) {
+            if (head(matchValue) != null) {
+                const t = value(head(matchValue));
+                if (t instanceof SetTreeNode$1) {
+                    throw new Exception("Please report error: Set iterator, unexpected stack for moveNext");
+                }
+                else {
+                    i.stack = SetTreeModule_collapseLHS(tail(matchValue));
+                    return !isEmpty(i.stack);
+                }
+            }
+            else {
+                throw new Exception("Please report error: Set iterator, unexpected stack for moveNext");
+            }
+        }
+        else {
+            return false;
+        }
+    }
+    else {
+        i.started = true;
+        return !isEmpty(i.stack);
+    }
+}
+function SetTreeModule_mkIEnumerator(s) {
+    let i = SetTreeModule_mkIterator(s);
+    return {
+        "System.Collections.Generic.IEnumerator`1.get_Current"() {
+            return SetTreeModule_current(i);
+        },
+        "System.Collections.IEnumerator.get_Current"() {
+            return SetTreeModule_current(i);
+        },
+        "System.Collections.IEnumerator.MoveNext"() {
+            return SetTreeModule_moveNext(i);
+        },
+        "System.Collections.IEnumerator.Reset"() {
+            i = SetTreeModule_mkIterator(s);
+        },
+        Dispose() {
+        },
+    };
+}
+/**
+ * Set comparison.  Note this can be expensive.
+ */
+function SetTreeModule_compareStacks(comparer_mut, l1_mut, l2_mut) {
+    SetTreeModule_compareStacks: while (true) {
+        const comparer = comparer_mut, l1 = l1_mut, l2 = l2_mut;
+        if (!isEmpty(l1)) {
+            if (!isEmpty(l2)) {
+                if (head(l2) != null) {
+                    if (head(l1) != null) {
+                        const x1_3 = value(head(l1));
+                        const x2_3 = value(head(l2));
+                        if (x1_3 instanceof SetTreeNode$1) {
+                            const x1n_2 = x1_3;
+                            if (SetTreeNode$1__get_Left(x1n_2) == null) {
+                                if (x2_3 instanceof SetTreeNode$1) {
+                                    const x2n_2 = x2_3;
+                                    if (SetTreeNode$1__get_Left(x2n_2) == null) {
+                                        const c = comparer.Compare(SetTreeLeaf$1__get_Key(x1n_2), SetTreeLeaf$1__get_Key(x2n_2)) | 0;
+                                        if (c !== 0) {
+                                            return c | 0;
+                                        }
+                                        else {
+                                            comparer_mut = comparer;
+                                            l1_mut = cons(SetTreeNode$1__get_Right(x1n_2), tail(l1));
+                                            l2_mut = cons(SetTreeNode$1__get_Right(x2n_2), tail(l2));
+                                            continue SetTreeModule_compareStacks;
+                                        }
+                                    }
+                                    else {
+                                        let matchResult = undefined, t1_6 = undefined, x1_4 = undefined, t2_6 = undefined, x2_4 = undefined;
+                                        if (!isEmpty(l1)) {
+                                            if (head(l1) != null) {
+                                                matchResult = 0;
+                                                t1_6 = tail(l1);
+                                                x1_4 = value(head(l1));
+                                            }
+                                            else if (!isEmpty(l2)) {
+                                                if (head(l2) != null) {
+                                                    matchResult = 1;
+                                                    t2_6 = tail(l2);
+                                                    x2_4 = value(head(l2));
+                                                }
+                                                else {
+                                                    matchResult = 2;
+                                                }
+                                            }
+                                            else {
+                                                matchResult = 2;
+                                            }
+                                        }
+                                        else if (!isEmpty(l2)) {
+                                            if (head(l2) != null) {
+                                                matchResult = 1;
+                                                t2_6 = tail(l2);
+                                                x2_4 = value(head(l2));
+                                            }
+                                            else {
+                                                matchResult = 2;
+                                            }
+                                        }
+                                        else {
+                                            matchResult = 2;
+                                        }
+                                        switch (matchResult) {
+                                            case 0:
+                                                if (x1_4 instanceof SetTreeNode$1) {
+                                                    const x1n_3 = x1_4;
+                                                    comparer_mut = comparer;
+                                                    l1_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x1n_3), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x1n_3), SetTreeModule_empty(), SetTreeNode$1__get_Right(x1n_3), 0)], t1_6);
+                                                    l2_mut = l2;
+                                                    continue SetTreeModule_compareStacks;
+                                                }
+                                                else {
+                                                    comparer_mut = comparer;
+                                                    l1_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x1_4))], t1_6);
+                                                    l2_mut = l2;
+                                                    continue SetTreeModule_compareStacks;
+                                                }
+                                            case 1:
+                                                if (x2_4 instanceof SetTreeNode$1) {
+                                                    const x2n_3 = x2_4;
+                                                    comparer_mut = comparer;
+                                                    l1_mut = l1;
+                                                    l2_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x2n_3), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x2n_3), SetTreeModule_empty(), SetTreeNode$1__get_Right(x2n_3), 0)], t2_6);
+                                                    continue SetTreeModule_compareStacks;
+                                                }
+                                                else {
+                                                    comparer_mut = comparer;
+                                                    l1_mut = l1;
+                                                    l2_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x2_4))], t2_6);
+                                                    continue SetTreeModule_compareStacks;
+                                                }
+                                            default:
+                                                throw new Exception("unexpected state in SetTree.compareStacks");
+                                        }
+                                    }
+                                }
+                                else {
+                                    const c_1 = comparer.Compare(SetTreeLeaf$1__get_Key(x1n_2), SetTreeLeaf$1__get_Key(x2_3)) | 0;
+                                    if (c_1 !== 0) {
+                                        return c_1 | 0;
+                                    }
+                                    else {
+                                        comparer_mut = comparer;
+                                        l1_mut = cons(SetTreeNode$1__get_Right(x1n_2), tail(l1));
+                                        l2_mut = cons(SetTreeModule_empty(), tail(l2));
+                                        continue SetTreeModule_compareStacks;
+                                    }
+                                }
+                            }
+                            else {
+                                let matchResult_1 = undefined, t1_7 = undefined, x1_5 = undefined, t2_7 = undefined, x2_5 = undefined;
+                                if (!isEmpty(l1)) {
+                                    if (head(l1) != null) {
+                                        matchResult_1 = 0;
+                                        t1_7 = tail(l1);
+                                        x1_5 = value(head(l1));
+                                    }
+                                    else if (!isEmpty(l2)) {
+                                        if (head(l2) != null) {
+                                            matchResult_1 = 1;
+                                            t2_7 = tail(l2);
+                                            x2_5 = value(head(l2));
+                                        }
+                                        else {
+                                            matchResult_1 = 2;
+                                        }
+                                    }
+                                    else {
+                                        matchResult_1 = 2;
+                                    }
+                                }
+                                else if (!isEmpty(l2)) {
+                                    if (head(l2) != null) {
+                                        matchResult_1 = 1;
+                                        t2_7 = tail(l2);
+                                        x2_5 = value(head(l2));
+                                    }
+                                    else {
+                                        matchResult_1 = 2;
+                                    }
+                                }
+                                else {
+                                    matchResult_1 = 2;
+                                }
+                                switch (matchResult_1) {
+                                    case 0:
+                                        if (x1_5 instanceof SetTreeNode$1) {
+                                            const x1n_4 = x1_5;
+                                            comparer_mut = comparer;
+                                            l1_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x1n_4), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x1n_4), SetTreeModule_empty(), SetTreeNode$1__get_Right(x1n_4), 0)], t1_7);
+                                            l2_mut = l2;
+                                            continue SetTreeModule_compareStacks;
+                                        }
+                                        else {
+                                            comparer_mut = comparer;
+                                            l1_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x1_5))], t1_7);
+                                            l2_mut = l2;
+                                            continue SetTreeModule_compareStacks;
+                                        }
+                                    case 1:
+                                        if (x2_5 instanceof SetTreeNode$1) {
+                                            const x2n_4 = x2_5;
+                                            comparer_mut = comparer;
+                                            l1_mut = l1;
+                                            l2_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x2n_4), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x2n_4), SetTreeModule_empty(), SetTreeNode$1__get_Right(x2n_4), 0)], t2_7);
+                                            continue SetTreeModule_compareStacks;
+                                        }
+                                        else {
+                                            comparer_mut = comparer;
+                                            l1_mut = l1;
+                                            l2_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x2_5))], t2_7);
+                                            continue SetTreeModule_compareStacks;
+                                        }
+                                    default:
+                                        throw new Exception("unexpected state in SetTree.compareStacks");
+                                }
+                            }
+                        }
+                        else if (x2_3 instanceof SetTreeNode$1) {
+                            const x2n_5 = x2_3;
+                            if (SetTreeNode$1__get_Left(x2n_5) == null) {
+                                const c_2 = comparer.Compare(SetTreeLeaf$1__get_Key(x1_3), SetTreeLeaf$1__get_Key(x2n_5)) | 0;
+                                if (c_2 !== 0) {
+                                    return c_2 | 0;
+                                }
+                                else {
+                                    comparer_mut = comparer;
+                                    l1_mut = cons(SetTreeModule_empty(), tail(l1));
+                                    l2_mut = cons(SetTreeNode$1__get_Right(x2n_5), tail(l2));
+                                    continue SetTreeModule_compareStacks;
+                                }
+                            }
+                            else {
+                                let matchResult_2 = undefined, t1_8 = undefined, x1_6 = undefined, t2_8 = undefined, x2_6 = undefined;
+                                if (!isEmpty(l1)) {
+                                    if (head(l1) != null) {
+                                        matchResult_2 = 0;
+                                        t1_8 = tail(l1);
+                                        x1_6 = value(head(l1));
+                                    }
+                                    else if (!isEmpty(l2)) {
+                                        if (head(l2) != null) {
+                                            matchResult_2 = 1;
+                                            t2_8 = tail(l2);
+                                            x2_6 = value(head(l2));
+                                        }
+                                        else {
+                                            matchResult_2 = 2;
+                                        }
+                                    }
+                                    else {
+                                        matchResult_2 = 2;
+                                    }
+                                }
+                                else if (!isEmpty(l2)) {
+                                    if (head(l2) != null) {
+                                        matchResult_2 = 1;
+                                        t2_8 = tail(l2);
+                                        x2_6 = value(head(l2));
+                                    }
+                                    else {
+                                        matchResult_2 = 2;
+                                    }
+                                }
+                                else {
+                                    matchResult_2 = 2;
+                                }
+                                switch (matchResult_2) {
+                                    case 0:
+                                        if (x1_6 instanceof SetTreeNode$1) {
+                                            const x1n_5 = x1_6;
+                                            comparer_mut = comparer;
+                                            l1_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x1n_5), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x1n_5), SetTreeModule_empty(), SetTreeNode$1__get_Right(x1n_5), 0)], t1_8);
+                                            l2_mut = l2;
+                                            continue SetTreeModule_compareStacks;
+                                        }
+                                        else {
+                                            comparer_mut = comparer;
+                                            l1_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x1_6))], t1_8);
+                                            l2_mut = l2;
+                                            continue SetTreeModule_compareStacks;
+                                        }
+                                    case 1:
+                                        if (x2_6 instanceof SetTreeNode$1) {
+                                            const x2n_6 = x2_6;
+                                            comparer_mut = comparer;
+                                            l1_mut = l1;
+                                            l2_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x2n_6), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x2n_6), SetTreeModule_empty(), SetTreeNode$1__get_Right(x2n_6), 0)], t2_8);
+                                            continue SetTreeModule_compareStacks;
+                                        }
+                                        else {
+                                            comparer_mut = comparer;
+                                            l1_mut = l1;
+                                            l2_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x2_6))], t2_8);
+                                            continue SetTreeModule_compareStacks;
+                                        }
+                                    default:
+                                        throw new Exception("unexpected state in SetTree.compareStacks");
+                                }
+                            }
+                        }
+                        else {
+                            const c_3 = comparer.Compare(SetTreeLeaf$1__get_Key(x1_3), SetTreeLeaf$1__get_Key(x2_3)) | 0;
+                            if (c_3 !== 0) {
+                                return c_3 | 0;
+                            }
+                            else {
+                                comparer_mut = comparer;
+                                l1_mut = tail(l1);
+                                l2_mut = tail(l2);
+                                continue SetTreeModule_compareStacks;
+                            }
+                        }
+                    }
+                    else {
+                        value(head(l2));
+                        let matchResult_3 = undefined, t1_2 = undefined, x1 = undefined, t2_2 = undefined, x2_1 = undefined;
+                        if (!isEmpty(l1)) {
+                            if (head(l1) != null) {
+                                matchResult_3 = 0;
+                                t1_2 = tail(l1);
+                                x1 = value(head(l1));
+                            }
+                            else if (!isEmpty(l2)) {
+                                if (head(l2) != null) {
+                                    matchResult_3 = 1;
+                                    t2_2 = tail(l2);
+                                    x2_1 = value(head(l2));
+                                }
+                                else {
+                                    matchResult_3 = 2;
+                                }
+                            }
+                            else {
+                                matchResult_3 = 2;
+                            }
+                        }
+                        else if (!isEmpty(l2)) {
+                            if (head(l2) != null) {
+                                matchResult_3 = 1;
+                                t2_2 = tail(l2);
+                                x2_1 = value(head(l2));
+                            }
+                            else {
+                                matchResult_3 = 2;
+                            }
+                        }
+                        else {
+                            matchResult_3 = 2;
+                        }
+                        switch (matchResult_3) {
+                            case 0:
+                                if (x1 instanceof SetTreeNode$1) {
+                                    const x1n = x1;
+                                    comparer_mut = comparer;
+                                    l1_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x1n), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x1n), SetTreeModule_empty(), SetTreeNode$1__get_Right(x1n), 0)], t1_2);
+                                    l2_mut = l2;
+                                    continue SetTreeModule_compareStacks;
+                                }
+                                else {
+                                    comparer_mut = comparer;
+                                    l1_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x1))], t1_2);
+                                    l2_mut = l2;
+                                    continue SetTreeModule_compareStacks;
+                                }
+                            case 1:
+                                if (x2_1 instanceof SetTreeNode$1) {
+                                    const x2n = x2_1;
+                                    comparer_mut = comparer;
+                                    l1_mut = l1;
+                                    l2_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x2n), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x2n), SetTreeModule_empty(), SetTreeNode$1__get_Right(x2n), 0)], t2_2);
+                                    continue SetTreeModule_compareStacks;
+                                }
+                                else {
+                                    comparer_mut = comparer;
+                                    l1_mut = l1;
+                                    l2_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x2_1))], t2_2);
+                                    continue SetTreeModule_compareStacks;
+                                }
+                            default:
+                                throw new Exception("unexpected state in SetTree.compareStacks");
+                        }
+                    }
+                }
+                else if (head(l1) != null) {
+                    value(head(l1));
+                    let matchResult_4 = undefined, t1_4 = undefined, x1_2 = undefined, t2_4 = undefined, x2_2 = undefined;
+                    if (!isEmpty(l1)) {
+                        if (head(l1) != null) {
+                            matchResult_4 = 0;
+                            t1_4 = tail(l1);
+                            x1_2 = value(head(l1));
+                        }
+                        else if (!isEmpty(l2)) {
+                            if (head(l2) != null) {
+                                matchResult_4 = 1;
+                                t2_4 = tail(l2);
+                                x2_2 = value(head(l2));
+                            }
+                            else {
+                                matchResult_4 = 2;
+                            }
+                        }
+                        else {
+                            matchResult_4 = 2;
+                        }
+                    }
+                    else if (!isEmpty(l2)) {
+                        if (head(l2) != null) {
+                            matchResult_4 = 1;
+                            t2_4 = tail(l2);
+                            x2_2 = value(head(l2));
+                        }
+                        else {
+                            matchResult_4 = 2;
+                        }
+                    }
+                    else {
+                        matchResult_4 = 2;
+                    }
+                    switch (matchResult_4) {
+                        case 0:
+                            if (x1_2 instanceof SetTreeNode$1) {
+                                const x1n_1 = x1_2;
+                                comparer_mut = comparer;
+                                l1_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x1n_1), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x1n_1), SetTreeModule_empty(), SetTreeNode$1__get_Right(x1n_1), 0)], t1_4);
+                                l2_mut = l2;
+                                continue SetTreeModule_compareStacks;
+                            }
+                            else {
+                                comparer_mut = comparer;
+                                l1_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x1_2))], t1_4);
+                                l2_mut = l2;
+                                continue SetTreeModule_compareStacks;
+                            }
+                        case 1:
+                            if (x2_2 instanceof SetTreeNode$1) {
+                                const x2n_1 = x2_2;
+                                comparer_mut = comparer;
+                                l1_mut = l1;
+                                l2_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x2n_1), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x2n_1), SetTreeModule_empty(), SetTreeNode$1__get_Right(x2n_1), 0)], t2_4);
+                                continue SetTreeModule_compareStacks;
+                            }
+                            else {
+                                comparer_mut = comparer;
+                                l1_mut = l1;
+                                l2_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x2_2))], t2_4);
+                                continue SetTreeModule_compareStacks;
+                            }
+                        default:
+                            throw new Exception("unexpected state in SetTree.compareStacks");
+                    }
+                }
+                else {
+                    comparer_mut = comparer;
+                    l1_mut = tail(l1);
+                    l2_mut = tail(l2);
+                    continue SetTreeModule_compareStacks;
+                }
+            }
+            else {
+                return 1;
+            }
+        }
+        else if (isEmpty(l2)) {
+            return 0;
+        }
+        else {
+            return -1;
+        }
+    }
+}
+function SetTreeModule_compare(comparer, t1, t2) {
+    if (t1 == null) {
+        if (t2 == null) {
+            return 0;
+        }
+        else {
+            return -1;
+        }
+    }
+    else if (t2 == null) {
+        return 1;
+    }
+    else {
+        return SetTreeModule_compareStacks(comparer, singleton$1(t1), singleton$1(t2)) | 0;
+    }
+}
+function SetTreeModule_copyToArray(s, arr, i) {
+    let j = i;
+    SetTreeModule_iter((x) => {
+        setItem(arr, j, x);
+        j = ((j + 1) | 0);
+    }, s);
+}
+function SetTreeModule_mkFromEnumerator(comparer_mut, acc_mut, e_mut) {
+    SetTreeModule_mkFromEnumerator: while (true) {
+        const comparer = comparer_mut, acc = acc_mut, e = e_mut;
+        if (e["System.Collections.IEnumerator.MoveNext"]()) {
+            comparer_mut = comparer;
+            acc_mut = SetTreeModule_add(comparer, e["System.Collections.Generic.IEnumerator`1.get_Current"](), acc);
+            e_mut = e;
+            continue SetTreeModule_mkFromEnumerator;
+        }
+        else {
+            return acc;
+        }
+    }
+}
+function SetTreeModule_ofArray(comparer, l) {
+    return fold$3((acc, k) => SetTreeModule_add(comparer, k, acc), SetTreeModule_empty(), l);
+}
+function SetTreeModule_ofList(comparer, l) {
+    return fold$1((acc, k) => SetTreeModule_add(comparer, k, acc), SetTreeModule_empty(), l);
+}
+function SetTreeModule_ofSeq(comparer, c) {
+    if (isArrayLike(c)) {
+        return SetTreeModule_ofArray(comparer, c);
+    }
+    else if (c instanceof FSharpList) {
+        return SetTreeModule_ofList(comparer, c);
+    }
+    else {
+        const ie = getEnumerator(c);
+        try {
+            return SetTreeModule_mkFromEnumerator(comparer, SetTreeModule_empty(), ie);
+        }
+        finally {
+            disposeSafe(ie);
+        }
+    }
+}
+class FSharpSet {
+    tree;
+    comparer;
+    constructor(comparer, tree) {
+        this.comparer = comparer;
+        this.tree = tree;
+    }
+    GetHashCode() {
+        const this$ = this;
+        return FSharpSet__ComputeHashCode(this$) | 0;
+    }
+    Equals(other) {
+        let that = undefined;
+        const this$ = this;
+        return (other instanceof FSharpSet) && ((that = other, SetTreeModule_compare(FSharpSet__get_Comparer(this$), FSharpSet__get_Tree(this$), FSharpSet__get_Tree(that)) === 0));
+    }
+    toString() {
+        const this$ = this;
+        let result = "set [";
+        let first = true;
+        const enumerator = getEnumerator(this$);
+        try {
+            while (enumerator["System.Collections.IEnumerator.MoveNext"]()) {
+                let x = undefined, matchValue = undefined, s = undefined;
+                const x_1 = enumerator["System.Collections.Generic.IEnumerator`1.get_Current"]();
+                result = ((first ? result : (result + "; ")) + ((x = x_1, (matchValue = x, (typeof matchValue === "string") ? ((s = matchValue, ("\"" + s) + "\"")) : toString$2(x)))));
+                first = false;
+            }
+        }
+        finally {
+            disposeSafe(enumerator);
+        }
+        return result + "]";
+    }
+    get [Symbol.toStringTag]() {
+        return "FSharpSet";
+    }
+    toJSON() {
+        const this$ = this;
+        return Array.from(this$);
+    }
+    CompareTo(other) {
+        let that = undefined;
+        const this$ = this;
+        return ((other instanceof FSharpSet) ? ((that = other, SetTreeModule_compare(FSharpSet__get_Comparer(this$), FSharpSet__get_Tree(this$), FSharpSet__get_Tree(that)))) : 1) | 0;
+    }
+    "System.Collections.Generic.ICollection`1.Add2B595"(x) {
+        throw NotSupportedException_$ctor_Z721C83C5("ReadOnlyCollection");
+    }
+    "System.Collections.Generic.ICollection`1.Clear"() {
+        throw NotSupportedException_$ctor_Z721C83C5("ReadOnlyCollection");
+    }
+    "System.Collections.Generic.ICollection`1.Remove2B595"(x) {
+        throw NotSupportedException_$ctor_Z721C83C5("ReadOnlyCollection");
+    }
+    "System.Collections.Generic.ICollection`1.Contains2B595"(x) {
+        const s = this;
+        return SetTreeModule_mem(FSharpSet__get_Comparer(s), x, FSharpSet__get_Tree(s));
+    }
+    "System.Collections.Generic.ICollection`1.CopyToZ3B4C077E"(arr, i) {
+        const s = this;
+        SetTreeModule_copyToArray(FSharpSet__get_Tree(s), arr, i);
+    }
+    "System.Collections.Generic.ICollection`1.get_IsReadOnly"() {
+        return true;
+    }
+    "System.Collections.Generic.ICollection`1.get_Count"() {
+        const s = this;
+        return FSharpSet__get_Count(s) | 0;
+    }
+    "System.Collections.Generic.IReadOnlyCollection`1.get_Count"() {
+        const s = this;
+        return FSharpSet__get_Count(s) | 0;
+    }
+    GetEnumerator() {
+        const s = this;
+        return SetTreeModule_mkIEnumerator(FSharpSet__get_Tree(s));
+    }
+    [Symbol.iterator]() {
+        return toIterator(getEnumerator(this));
+    }
+    "System.Collections.IEnumerable.GetEnumerator"() {
+        const s = this;
+        return SetTreeModule_mkIEnumerator(FSharpSet__get_Tree(s));
+    }
+    get size() {
+        const s = this;
+        return FSharpSet__get_Count(s) | 0;
+    }
+    add(k) {
+        throw new Exception("Set cannot be mutated");
+    }
+    clear() {
+        throw new Exception("Set cannot be mutated");
+    }
+    delete(k) {
+        throw new Exception("Set cannot be mutated");
+    }
+    has(k) {
+        const s = this;
+        return FSharpSet__Contains(s, k);
+    }
+    keys() {
+        const s = this;
+        return map$1((x) => x, s);
+    }
+    values() {
+        const s = this;
+        return map$1((x) => x, s);
+    }
+    entries() {
+        const s = this;
+        return map$1((v) => [v, v], s);
+    }
+    forEach(f, thisArg) {
+        const s = this;
+        iterate((x) => {
+            f(x, x, s);
+        }, s);
+    }
+}
+function FSharpSet_$ctor(comparer, tree) {
+    return new FSharpSet(comparer, tree);
+}
+function FSharpSet__get_Comparer(set$) {
+    return set$.comparer;
+}
+function FSharpSet__get_Tree(set$) {
+    return set$.tree;
+}
+function FSharpSet__get_Count(s) {
+    return SetTreeModule_count(FSharpSet__get_Tree(s)) | 0;
+}
+function FSharpSet__Contains(s, value) {
+    return SetTreeModule_mem(FSharpSet__get_Comparer(s), value, FSharpSet__get_Tree(s));
+}
+function FSharpSet__ComputeHashCode(this$) {
+    let res = 0;
+    const enumerator = getEnumerator(this$);
+    try {
+        while (enumerator["System.Collections.IEnumerator.MoveNext"]()) {
+            const x_1 = enumerator["System.Collections.Generic.IEnumerator`1.get_Current"]();
+            res = ((((res << 1) + structuralHash(x_1)) + 631) | 0);
+        }
+    }
+    finally {
+        disposeSafe(enumerator);
+    }
+    return Math.abs(res) | 0;
+}
+function ofSeq(elements, comparer) {
+    return FSharpSet_$ctor(comparer, SetTreeModule_ofSeq(comparer, elements));
+}
+
+const UriKind = {
+    RelativeOrAbsolute: 0,
+    Absolute: 1,
+    Relative: 2,
+};
+const ok = (value) => ({
+    tag: "ok",
+    value,
+});
+const error = (error) => ({ tag: "error", error });
+class Uri {
+    uri;
+    constructor(state) {
+        this.uri = state;
+    }
+    static isAbsoluteUri(uri) {
+        try {
+            new URL(uri);
+            return true;
+        }
+        catch {
+            return false;
+        }
+    }
+    static tryCreateWithKind(uri, kind) {
+        switch (kind) {
+            case UriKind.Absolute:
+                return Uri.isAbsoluteUri(uri)
+                    ? ok(new Uri({ original: uri, value: new URL(uri), kind }))
+                    : error("Invalid URI: The format of the URI could not be determined.");
+            case UriKind.Relative:
+                return Uri.isAbsoluteUri(uri)
+                    ? error("URI is not a relative path.")
+                    : ok(new Uri({ original: uri, value: uri, kind }));
+            case UriKind.RelativeOrAbsolute:
+                return Uri.isAbsoluteUri(uri)
+                    ? ok(new Uri({ original: uri, value: new URL(uri), kind: UriKind.Absolute }))
+                    : ok(new Uri({ original: uri, value: uri, kind: UriKind.Relative }));
+            default:
+                const never = kind;
+                return never;
+        }
+    }
+    static tryCreateWithBase(baseUri, relativeUri) {
+        return baseUri.uri.kind !== UriKind.Absolute
+            ? error("Base URI should have Absolute kind")
+            : typeof relativeUri === "string"
+                ? ok(new Uri({
+                    original: new URL(relativeUri, baseUri.uri.value).toString(),
+                    value: new URL(relativeUri, baseUri.uri.value),
+                    kind: UriKind.Absolute,
+                }))
+                : relativeUri.uri.kind === UriKind.Relative
+                    ? ok(new Uri({
+                        original: new URL(relativeUri.uri.value, baseUri.uri.value).toString(),
+                        value: new URL(relativeUri.uri.value, baseUri.uri.value),
+                        kind: UriKind.Absolute,
+                    }))
+                    : ok(baseUri);
+    }
+    static tryCreateImpl(value, kindOrUri = UriKind.Absolute) {
+        return typeof value === "string"
+            ? typeof kindOrUri !== "number"
+                ? error("Kind must be specified when the baseUri is a string.")
+                : Uri.tryCreateWithKind(value, kindOrUri)
+            : typeof kindOrUri === "number"
+                ? error("Kind should not be specified when the baseUri is an absolute Uri.")
+                : Uri.tryCreateWithBase(value, kindOrUri);
+    }
+    static create(value, kindOrUri = UriKind.Absolute) {
+        const result = Uri.tryCreateImpl(value, kindOrUri);
+        switch (result.tag) {
+            case "ok":
+                return result.value;
+            case "error":
+                throw new Exception(result.error);
+            default:
+                const never = result;
+                return never;
+        }
+    }
+    static tryCreate(value, kindOrUri = UriKind.Absolute, out) {
+        const result = Uri.tryCreateImpl(value, kindOrUri);
+        switch (result.tag) {
+            case "ok":
+                out.contents = result.value;
+                return true;
+            case "error":
+                return false;
+            default:
+                const never = result;
+                return never;
+        }
+    }
+    toString() {
+        switch (this.uri.kind) {
+            case UriKind.Absolute:
+                return decodeURIComponent(this.asUrl().toString());
+            case UriKind.Relative:
+                return this.uri.value;
+            default:
+                const never = this.uri;
+                return never;
+        }
+    }
+    asUrl() {
+        switch (this.uri.kind) {
+            case UriKind.Absolute:
+                return this.uri.value;
+            case UriKind.Relative:
+                throw new Exception("This operation is not supported for a relative URI.");
+            default:
+                const never = this.uri;
+                return never;
+        }
+    }
+    get isAbsoluteUri() {
+        return this.uri.kind === UriKind.Absolute;
+    }
+    get absoluteUri() {
+        return this.asUrl().href;
+    }
+    get scheme() {
+        const protocol = this.asUrl().protocol;
+        return protocol.slice(0, protocol.length - 1);
+    }
+    get host() {
+        const host = this.asUrl().host;
+        if (host.includes(":")) {
+            return host.split(":")[0];
+        }
+        else {
+            return host;
+        }
+    }
+    get absolutePath() {
+        return this.asUrl().pathname;
+    }
+    get query() {
+        return this.asUrl().search;
+    }
+    get isDefaultPort() {
+        return this.port === 80;
+    }
+    get port() {
+        const port = this.asUrl().port;
+        if (port === "") {
+            return 80;
+        }
+        else {
+            return parseInt(port);
+        }
+    }
+    get pathAndQuery() {
+        const url = this.asUrl();
+        return url.pathname + url.search;
+    }
+    get fragment() {
+        return this.asUrl().hash;
+    }
+    get originalString() {
+        return this.uri.original;
+    }
+}
+
+function distinct(xs, comparer) {
+    return delay(() => {
+        const hashSet = new HashSet([], comparer);
+        return filter((x) => addToSet(x, hashSet), xs);
     });
 }
-function fromContinuations(f) {
-    return protectedCont((ctx) => f([ctx.onSuccess, ctx.onError, ctx.onCancel]));
+function List_distinct(xs, comparer) {
+    return toList$1(distinct(xs, comparer));
 }
-function startWithContinuations(computation, continuation, exceptionContinuation, cancellationContinuation, cancelToken) {
-    const trampoline = new Trampoline();
-    // Mark the computation completed as soon as a terminal continuation is entered
-    // so protectedCont lets exceptions from continuation code propagate instead of
-    // routing them to onError (see Trampoline.completed).
-    const done = (cont) => (x) => { trampoline.completed = true; return cont(x); };
-    computation({
-        onSuccess: done(continuation ? continuation : emptyContinuation),
-        onError: done(exceptionContinuation),
-        onCancel: done(cancellationContinuation),
-        cancelToken: cancelToken ? cancelToken : defaultCancellationToken,
-        trampoline,
+
+function Eligibility_Ineligible(reasons) {
+    return new Eligibility(1, [reasons]);
+}
+class Eligibility extends Union {
+    constructor(tag, fields) {
+        super();
+        this.tag = tag;
+        this.fields = fields;
+    }
+    tag;
+    fields;
+    cases() {
+        return ["Eligible", "Ineligible"];
+    }
+    static Eligible = new Eligibility(0, []);
+}
+const EligibilityModule_publicNuGetHosts = ofSeq(["api.nuget.org", "www.nuget.org", "nuget.org"], {
+    Compare: (x, y) => (comparePrimitives(x, y) | 0),
+});
+function EligibilityModule_isCommentOrEmpty(line) {
+    const value = line.trim();
+    if (isNullOrWhiteSpace(value)) {
+        return true;
+    }
+    else {
+        return value.startsWith("#");
+    }
+}
+function EligibilityModule_sourceReason(line) {
+    let uri = undefined;
+    const value = trim(substring(line.trim(), "source ".length).trim(), "\"");
+    let hasUserInfo;
+    const schemeSeparator = indexOf(value, "://") | 0;
+    if (schemeSeparator < 0) {
+        hasUserInfo = false;
+    }
+    else {
+        const authorityStart = (schemeSeparator + 3) | 0;
+        const pathStart = value.indexOf("/", authorityStart) | 0;
+        const authority = (pathStart < 0) ? substring(value, authorityStart) : substring(value, authorityStart, pathStart - authorityStart);
+        hasUserInfo = (authority.indexOf("@") >= 0);
+    }
+    let matchValue;
+    let outArg = defaultOf();
+    matchValue = [Uri.tryCreate(value, 1, new FSharpRef(() => outArg, (v) => {
+            outArg = v;
+        })), outArg];
+    let matchResult = undefined;
+    if (matchValue[0]) {
+        if ((uri = matchValue[1], ((uri.scheme === "https") && FSharpSet__Contains(EligibilityModule_publicNuGetHosts, uri.host.toLowerCase())) && !hasUserInfo)) {
+            matchResult = 0;
+        }
+        else {
+            matchResult = 1;
+        }
+    }
+    else {
+        matchResult = 1;
+    }
+    switch (matchResult) {
+        case 0:
+            return undefined;
+        default:
+            return concat$1("unsupported package source: ", value);
+    }
+}
+function EligibilityModule_unsupportedReason(line) {
+    const value = line.trim();
+    const lower = value.toLowerCase();
+    if (lower.startsWith("source ")) {
+        return EligibilityModule_sourceReason(value);
+    }
+    else if (exists((value_1) => lower.startsWith(value_1), ofArray$1(["git ", "github ", "http ", "file ", "cache ", "credentials ", "username ", "password "]))) {
+        return concat$1("unsupported Paket directive: ", value);
+    }
+    else {
+        return undefined;
+    }
+}
+/**
+ * Validate the deliberately narrow credential-free runner policy for Paket inputs.
+ *
+ * decision: v1 accepts only HTTPS NuGet.org sources so the runner never needs package-source credentials
+ * invariant: every non-comment source directive resolves to a public NuGet.org host without user information
+ */
+function EligibilityModule_inspect(dependencies) {
+    let lines;
+    const array = split(dependencies, ["\r", "\n"], undefined, 1);
+    lines = array.filter((arg) => !EligibilityModule_isCommentOrEmpty(arg));
+    const reasons = List_distinct(toList$1(delay(() => append$1(!lines.some((line_1) => startsWith(line_1.trim(), "source ", 5)) ? singleton$2("paket.dependencies must declare a public NuGet.org source") : empty$2(), delay(() => choose$2(EligibilityModule_unsupportedReason, lines))))), {
+        Equals: (x, y) => (x === y),
+        GetHashCode: (x) => (stringHash(x) | 0),
+    });
+    if (isEmpty(reasons)) {
+        return Eligibility.Eligible;
+    }
+    else {
+        return Eligibility_Ineligible(reasons);
+    }
+}
+
+const packageLine = /^\s{4}([A-Za-z0-9_.-]+) \(([^ )]+)/gu;
+function packages(lockFile) {
+    return ofArray(choose$2((line) => {
+        const matched = match(packageLine, line);
+        if (matched != null) {
+            return [matched[1] || "", matched[2] || ""];
+        }
+        else {
+            return undefined;
+        }
+    }, split(lockFile, ["\r", "\n"], undefined, 1)), {
+        Compare: (x, y) => (comparePrimitives(x, y) | 0),
     });
 }
-function startAsPromise(computation, cancellationToken) {
-    return new Promise((resolve, reject) => startWithContinuations(computation, resolve, reject, reject, defaultCancellationToken));
+function changes(previous, current) {
+    const before = packages(previous);
+    return choose((tupledArg) => {
+        const name = tupledArg[0];
+        const currentVersion = tupledArg[1];
+        const matchValue = tryFind(name, before);
+        let matchResult = undefined, previousVersion_1 = undefined;
+        if (matchValue != null) {
+            if (value(matchValue) !== currentVersion) {
+                matchResult = 0;
+                previousVersion_1 = value(matchValue);
+            }
+            else {
+                matchResult = 1;
+            }
+        }
+        else {
+            matchResult = 1;
+        }
+        switch (matchResult) {
+            case 0:
+                return new VersionChange(name, previousVersion_1, currentVersion);
+            default:
+                return undefined;
+        }
+    }, toList(packages(current)));
+}
+
+class PaketResolver {
+    workspace;
+    isolatedHome;
+    executable;
+    constructor(workspace, executable, isolatedHome) {
+        this.workspace = workspace;
+        this.executable = executable;
+        this.isolatedHome = isolatedHome;
+    }
+    Resolve() {
+        const _ = this;
+        return singleton.Delay(() => singleton.Bind(awaitPromise(mkdir(_.isolatedHome, {
+            recursive: true,
+        })), () => {
+            const dependenciesPath = join$1(_.workspace, "paket.dependencies");
+            const lockPath = join$1(_.workspace, "paket.lock");
+            return singleton.Bind(awaitPromise(readFile(dependenciesPath, "utf8")), (_arg_1) => {
+                const matchValue = EligibilityModule_inspect(_arg_1);
+                if (matchValue.tag === /* Eligible */ 0) {
+                    return singleton.Bind(awaitPromise(readFile(lockPath, "utf8")), (_arg_2) => {
+                        const previous = _arg_2;
+                        const options = {
+                            cwd: _.workspace,
+                            env: {
+                                PATH: process.env["PATH"] ?? '',
+                                HOME: _.isolatedHome,
+                                TMPDIR: _.isolatedHome,
+                                DOTNET_ROOT: process.env["DOTNET_ROOT"] ?? '',
+                                DOTNET_CLI_HOME: join$1(_.isolatedHome, "dotnet"),
+                                DOTNET_NOLOGO: "1",
+                                DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1",
+                                NUGET_PACKAGES: join$1(_.isolatedHome, "nuget"),
+                            },
+                            timeout: 540000,
+                            maxBuffer: 1048576,
+                        };
+                        return singleton.Bind(awaitPromise(execFile(_.executable, ["update", "--no-install"], options)), (_arg_3) => {
+                            const stderr = _arg_3[1];
+                            return singleton.Bind(awaitPromise(readFile(lockPath, "utf8")), (_arg_4) => {
+                                const current = _arg_4;
+                                return (current === previous) ? singleton.Return(new ResolutionResult(ResolutionStatus.NoChange, undefined, empty$1(), empty$1())) : singleton.Return(new ResolutionResult(ResolutionStatus.Updated, current, changes(previous, current), isNullOrWhiteSpace(stderr) ? empty$1() : singleton$1(stderr.trim())));
+                            });
+                        });
+                    });
+                }
+                else {
+                    const reasons = matchValue.fields[0];
+                    return singleton.Return(new ResolutionResult(ResolutionStatus.Rejected, undefined, empty$1(), reasons));
+                }
+            });
+        }));
+    }
+}
+function PaketResolver_$ctor_30230F9B(workspace, executable, isolatedHome) {
+    return new PaketResolver(workspace, executable, isolatedHome);
+}
+
+function PullRequestBody_render(changes) {
+    return concat$1("<!-- paketabot:weekly -->", "\nPaketaBot updated the versions allowed by `paket.dependencies`.\n\n| Package | From | To |\n|---|---:|---:|\n", join("\n", map((change) => (`| \`${change.Name}\` | \`${change.Previous}\` | \`${change.Current}\` |`), changes)), "\n\nGenerated by PaketaBot. Repository CI remains responsible for validation.\n");
+}
+class ResolveService {
+    resolver;
+    constructor(resolver) {
+        this.resolver = resolver;
+    }
+}
+function ResolveService_$ctor_F180EBC(resolver) {
+    return new ResolveService(resolver);
+}
+/**
+ * Resolve one dependency update without publisher credentials.
+ *
+ * invariant: resolver exceptions become typed failures that can cross the Actions artifact boundary
+ */
+function ResolveService__Run(_) {
+    return singleton.Delay(() => singleton.TryWith(singleton.Delay(() => singleton.ReturnFrom(_.resolver.Resolve())), (_arg) => singleton.Return(new ResolutionResult(ResolutionStatus.Failed, undefined, empty$1(), singleton$1(_arg.message)))));
+}
+class PublishService {
+    github;
+    constructor(github) {
+        this.github = github;
+    }
+}
+function PublishService_$ctor_1622FD4C(github) {
+    return new PublishService(github);
+}
+/**
+ * Publish one typed dependency resolution from the credential-free job.
+ *
+ * decision: uses the marked pull request as durable publication state because the Action has no database
+ * invariant: only a successful resolution containing paket.lock can reach the GitHub publisher
+ */
+function PublishService__Run_Z750F7FC2(_, repository, baseSha, result) {
+    return singleton.Delay(() => singleton.TryWith(singleton.Delay(() => {
+        const matchValue = result.Status;
+        const matchValue_1 = result.LockFile;
+        let matchResult = undefined;
+        switch (matchValue.tag) {
+            case /* NoChange */ 0: {
+                matchResult = 0;
+                break;
+            }
+            case /* Updated */ 1: {
+                if (matchValue_1 != null) {
+                    matchResult = 1;
+                }
+                else {
+                    matchResult = 2;
+                }
+                break;
+            }
+            default:
+                matchResult = 2;
+        }
+        switch (matchResult) {
+            case 0:
+                return singleton.Return(UpdateOutcome.Unchanged);
+            case 1: {
+                const lockFile = value(matchValue_1);
+                return singleton.Bind(_.github.TryGetPublication(repository), (_arg) => {
+                    const publish = new PublishUpdate(repository, baseSha, _arg, "paketabot/weekly", "paket.lock", lockFile, "chore(deps): update Paket dependencies", PullRequestBody_render(result.Changes));
+                    return singleton.Bind(_.github.Publish(publish), (_arg_1) => singleton.Return(UpdateOutcome_Published(_arg_1)));
+                });
+            }
+            default:
+                return singleton.Return(UpdateOutcome_RunFailed(result.Messages));
+        }
+    }), (_arg_2) => singleton.Return(UpdateOutcome_RunFailed(singleton$1(_arg_2.message)))));
 }
 
 class Context {
@@ -34152,7 +38325,7 @@ function expand(template, context) {
 }
 
 // pkg/dist-src/parse.js
-function parse$3(options) {
+function parse(options) {
   let method = options.method.toUpperCase();
   let url = (options.url || "/").replace(/:([a-z]\w+)/g, "{$1}");
   let headers = Object.assign({}, options.headers);
@@ -34218,7 +38391,7 @@ function parse$3(options) {
 
 // pkg/dist-src/endpoint-with-defaults.js
 function endpointWithDefaults(defaults, route, options) {
-  return parse$3(merge(defaults, route, options));
+  return parse(merge(defaults, route, options));
 }
 
 // pkg/dist-src/with-defaults.js
@@ -34229,7 +38402,7 @@ function withDefaults$2(oldDefaults, newDefaults) {
     DEFAULTS: DEFAULTS2,
     defaults: withDefaults$2.bind(null, DEFAULTS2),
     merge: merge.bind(null, DEFAULTS2),
-    parse: parse$3
+    parse
   });
 }
 
@@ -35211,7 +39384,7 @@ function withDefaults$1(oldEndpoint, newDefaults) {
 }
 
 // pkg/dist-src/index.js
-var request$1 = withDefaults$1(endpoint, defaults_default);
+var request = withDefaults$1(endpoint, defaults_default);
 /* v8 ignore next -- @preserve */
 /* v8 ignore else -- @preserve */
 
@@ -35321,7 +39494,7 @@ function withDefaults(request2, newDefaults) {
 }
 
 // pkg/dist-src/index.js
-withDefaults(request$1, {
+withDefaults(request, {
   headers: {
     "user-agent": `octokit-graphql.js/${VERSION$3} ${getUserAgent()}`
   },
@@ -35454,7 +39627,7 @@ class Octokit {
   constructor(options = {}) {
     const hook = new Hook.Collection();
     const requestDefaults = {
-      baseUrl: request$1.endpoint.DEFAULTS.baseUrl,
+      baseUrl: request.endpoint.DEFAULTS.baseUrl,
       headers: {},
       request: Object.assign({}, options.request, {
         // @ts-ignore internal usage only, no need to type
@@ -35475,7 +39648,7 @@ class Octokit {
     if (options.timeZone) {
       requestDefaults.headers["time-zone"] = options.timeZone;
     }
-    this.request = request$1.defaults(requestDefaults);
+    this.request = request.defaults(requestDefaults);
     this.graphql = withCustomRequest(this.request).defaults(requestDefaults);
     this.log = createLogger(options.log);
     this.hook = hook;
@@ -38116,25 +42289,6 @@ function getOctokit(token, options, ...additionalPlugins) {
     return new GitHubWithPlugins(getOctokitOptions(token));
 }
 
-function request(client, route, parameters) {
-    return client.request(route, parameters);
-}
-function mkdir(path, options) {
-    return mkdir$2(path, options).then(() => undefined);
-}
-function execFile(file, args, options) {
-    return new Promise((resolve, reject) => {
-        execFile$1(file, args, options, ((error, stdout, stderr) => {
-            if (Operators_IsNull(error)) {
-                resolve([stdout, stderr]);
-            }
-            else {
-                reject(new Exception(isNullOrWhiteSpace(stderr) ? error.message : stderr));
-            }
-        }));
-    });
-}
-
 function GitHubValues_data(response) {
     return response.data;
 }
@@ -38157,30 +42311,30 @@ class OctokitGateway {
     }
     GetRepository(owner, name) {
         const _ = this;
-        return singleton$1.Delay(() => singleton$1.Bind(OctokitGateway__call(_, "GET /repos/{owner}/{repo}", {
+        return singleton.Delay(() => singleton.Bind(OctokitGateway__call(_, "GET /repos/{owner}/{repo}", {
             owner: owner,
             repo: name,
         }), (_arg) => {
             const value = GitHubValues_data(_arg);
-            return singleton$1.Return(new Repository(value.owner.login, value.name, value.default_branch));
+            return singleton.Return(new Repository(value.owner.login, value.name, value.default_branch));
         }));
     }
     TryGetPublication(repository) {
         const _ = this;
-        return singleton$1.Delay(() => singleton$1.Bind(OctokitGateway__findPull(_, repository, "all"), (_arg) => {
+        return singleton.Delay(() => singleton.Bind(OctokitGateway__findPull(_, repository, "all"), (_arg) => {
             let option_1 = undefined, value$1 = undefined;
-            return singleton$1.Return((option_1 = _arg, (option_1 != null) ? ((value$1 = value(option_1), new Publication("paketabot/weekly", value$1.number, value$1.head.sha))) : undefined));
+            return singleton.Return((option_1 = _arg, (option_1 != null) ? ((value$1 = value(option_1), new Publication("paketabot/weekly", value$1.number, value$1.head.sha))) : undefined));
         }));
     }
     Publish(update) {
         const _ = this;
-        return singleton$1.Delay(() => singleton$1.Combine(!Branches_isOwned(update.Branch) ? (((() => {
+        return singleton.Delay(() => singleton.Combine(!Branches_isOwned(update.Branch) ? (((() => {
             throw new Exception("PaketaBot can only publish its owned weekly branch (Parameter \'Branch\')");
-        })(), singleton$1.Zero())) : singleton$1.Zero(), singleton$1.Delay(() => singleton$1.Combine(!PaketFiles_isLock(update.Path) ? (((() => {
+        })(), singleton.Zero())) : singleton.Zero(), singleton.Delay(() => singleton.Combine(!PaketFiles_isLock(update.Path) ? (((() => {
             throw new Exception("PaketaBot can only publish paket.lock (Parameter \'Path\')");
-        })(), singleton$1.Zero())) : singleton$1.Zero(), singleton$1.Delay(() => {
+        })(), singleton.Zero())) : singleton.Zero(), singleton.Delay(() => {
             const repo = OctokitGateway__repoParameters_Z212AD886(_, update.Repository);
-            return singleton$1.Bind(catchAsync(OctokitGateway__call(_, "GET /repos/{owner}/{repo}/git/ref/{ref}", createObj(append(repo, singleton(["ref", concat$1("heads/", update.Branch)]))))), (_arg) => {
+            return singleton.Bind(catchAsync(OctokitGateway__call(_, "GET /repos/{owner}/{repo}/git/ref/{ref}", createObj(append(repo, singleton$1(["ref", concat$1("heads/", update.Branch)]))))), (_arg) => {
                 let error = undefined, option_1 = undefined;
                 const currentRef = _arg;
                 let currentHead;
@@ -38207,27 +42361,27 @@ class OctokitGateway {
                     publicationPlan = matchValue.fields[0];
                 }
                 const parentSha = (publicationPlan.tag === /* FastForwardFrom */ 1) ? publicationPlan.fields[0] : publicationPlan.fields[0];
-                return singleton$1.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/blobs", createObj(append(repo, ofArray$1([["content", Buffer.from(update.Content, 'utf8').toString('base64')], ["encoding", "base64"]])))), (_arg_2) => {
+                return singleton.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/blobs", createObj(append(repo, ofArray$1([["content", Buffer.from(update.Content, 'utf8').toString('base64')], ["encoding", "base64"]])))), (_arg_2) => {
                     const treeItem = {
                         path: update.Path,
                         mode: "100644",
                         type: "blob",
                         sha: GitHubValues_data(_arg_2).sha,
                     };
-                    return singleton$1.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/trees", createObj(append(repo, ofArray$1([["base_tree", update.BaseSha], ["tree", [treeItem]]])))), (_arg_3) => {
+                    return singleton.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/trees", createObj(append(repo, ofArray$1([["base_tree", update.BaseSha], ["tree", [treeItem]]])))), (_arg_3) => {
                         const treeSha = GitHubValues_data(_arg_3).sha;
-                        return singleton$1.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/commits", createObj(append(repo, ofArray$1([["message", update.Title], ["tree", treeSha], ["parents", [parentSha]]])))), (_arg_4) => {
+                        return singleton.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/commits", createObj(append(repo, ofArray$1([["message", update.Title], ["tree", treeSha], ["parents", [parentSha]]])))), (_arg_4) => {
                             const commitSha = GitHubValues_data(_arg_4).sha;
-                            return singleton$1.Combine((publicationPlan.tag === /* CreateFrom */ 0) ? singleton$1.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/refs", createObj(append(repo, ofArray$1([["ref", concat$1("refs/heads/", update.Branch)], ["sha", commitSha]])))), (_arg_6) => {
-                                return singleton$1.Zero();
-                            }) : singleton$1.Bind(OctokitGateway__call(_, "PATCH /repos/{owner}/{repo}/git/refs/{ref}", createObj(append(repo, ofArray$1([["ref", concat$1("heads/", update.Branch)], ["sha", commitSha], ["force", false]])))), (_arg_5) => {
-                                return singleton$1.Zero();
-                            }), singleton$1.Delay(() => singleton$1.Bind(OctokitGateway__findPull(_, update.Repository, "open"), (_arg_7) => {
+                            return singleton.Combine((publicationPlan.tag === /* CreateFrom */ 0) ? singleton.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/refs", createObj(append(repo, ofArray$1([["ref", concat$1("refs/heads/", update.Branch)], ["sha", commitSha]])))), (_arg_6) => {
+                                return singleton.Zero();
+                            }) : singleton.Bind(OctokitGateway__call(_, "PATCH /repos/{owner}/{repo}/git/refs/{ref}", createObj(append(repo, ofArray$1([["ref", concat$1("heads/", update.Branch)], ["sha", commitSha], ["force", false]])))), (_arg_5) => {
+                                return singleton.Zero();
+                            }), singleton.Delay(() => singleton.Bind(OctokitGateway__findPull(_, update.Repository, "open"), (_arg_7) => {
                                 let value$1 = undefined;
                                 const existing = _arg_7;
-                                return singleton$1.Bind((existing == null) ? OctokitGateway__call(_, "POST /repos/{owner}/{repo}/pulls", createObj(append(repo, ofArray$1([["title", update.Title], ["body", update.Body], ["head", update.Branch], ["base", update.Repository.DefaultBranch]])))) : ((value$1 = value(existing), OctokitGateway__call(_, "PATCH /repos/{owner}/{repo}/pulls/{pull_number}", createObj(append(repo, ofArray$1([["pull_number", value$1.number], ["title", update.Title], ["body", update.Body]])))))), (_arg_8) => {
+                                return singleton.Bind((existing == null) ? OctokitGateway__call(_, "POST /repos/{owner}/{repo}/pulls", createObj(append(repo, ofArray$1([["title", update.Title], ["body", update.Body], ["head", update.Branch], ["base", update.Repository.DefaultBranch]])))) : ((value$1 = value(existing), OctokitGateway__call(_, "PATCH /repos/{owner}/{repo}/pulls/{pull_number}", createObj(append(repo, ofArray$1([["pull_number", value$1.number], ["title", update.Title], ["body", update.Body]])))))), (_arg_8) => {
                                     const pullData = GitHubValues_data(_arg_8);
-                                    return singleton$1.Return(new Publication(update.Branch, pullData.number, commitSha));
+                                    return singleton.Return(new Publication(update.Branch, pullData.number, commitSha));
                                 });
                             })));
                         });
@@ -38241,2483 +42395,32 @@ function OctokitGateway_$ctor_Z721C83C5(token) {
     return new OctokitGateway(token);
 }
 function OctokitGateway__call(this$, route, parameters) {
-    return awaitPromise(request(this$.client, route, parameters));
+    return awaitPromise(request$1(this$.client, route, parameters));
 }
 function OctokitGateway__repoParameters_Z212AD886(this$, repository) {
     return ofArray$1([["owner", repository.Owner], ["repo", repository.Name]]);
 }
 function OctokitGateway__getPublisherLogin(this$) {
-    return singleton$1.Delay(() => {
+    return singleton.Delay(() => {
         const matchValue = this$.publisherLogin;
         if (matchValue == null) {
-            return singleton$1.Bind(OctokitGateway__call(this$, "GET /user", {}), (_arg) => {
+            return singleton.Bind(OctokitGateway__call(this$, "GET /user", {}), (_arg) => {
                 const value_1 = GitHubValues_data(_arg).login;
                 this$.publisherLogin = value_1;
-                return singleton$1.Return(value_1);
+                return singleton.Return(value_1);
             });
         }
         else {
             const value$1 = value(matchValue);
-            return singleton$1.Return(value$1);
+            return singleton.Return(value$1);
         }
     });
 }
 function OctokitGateway__findPull(this$, repository, state) {
-    return singleton$1.Delay(() => singleton$1.Bind(OctokitGateway__getPublisherLogin(this$), (_arg) => singleton$1.Bind(OctokitGateway__call(this$, "GET /repos/{owner}/{repo}/pulls", createObj(append(OctokitGateway__repoParameters_Z212AD886(this$, repository), ofArray$1([["state", state], ["head", concat$1(repository.Owner, ":", "paketabot/weekly")], ["per_page", 100]])))), (_arg_1) => {
+    return singleton.Delay(() => singleton.Bind(OctokitGateway__getPublisherLogin(this$), (_arg) => singleton.Bind(OctokitGateway__call(this$, "GET /repos/{owner}/{repo}/pulls", createObj(append(OctokitGateway__repoParameters_Z212AD886(this$, repository), ofArray$1([["state", state], ["head", concat$1(repository.Owner, ":", "paketabot/weekly")], ["per_page", 100]])))), (_arg_1) => {
         const pulls = GitHubValues_data(_arg_1);
-        return singleton$1.Return(tryFind$1((value) => GitHubValues_isTrackedPull(repository, _arg, value), pulls));
+        return singleton.Return(tryFind$1((value) => GitHubValues_isTrackedPull(repository, _arg, value), pulls));
     })));
-}
-
-function PullRequestBody_render(changes) {
-    return concat$1("<!-- paketabot:weekly -->", "\nPaketaBot updated the versions allowed by `paket.dependencies`.\n\n| Package | From | To |\n|---|---:|---:|\n", join("\n", map((change) => (`| \`${change.Name}\` | \`${change.Previous}\` | \`${change.Current}\` |`), changes)), "\n\nGenerated by PaketaBot. Repository CI remains responsible for validation.\n");
-}
-class UpdateService {
-    runner;
-    github;
-    artifacts;
-    constructor(github, artifacts, runner) {
-        this.github = github;
-        this.artifacts = artifacts;
-        this.runner = runner;
-    }
-}
-function UpdateService_$ctor_18D3CDF0(github, artifacts, runner) {
-    return new UpdateService(github, artifacts, runner);
-}
-/**
- * Resolve and publish one repository-local dependency update.
- *
- * decision: uses the marked pull request as durable publication state because the Action has no database
- * invariant: repository archives cross into the runner without PAKETABOT_TOKEN or checkout credentials
- */
-function UpdateService__Run_34996A81(_, repository, baseSha) {
-    return singleton$1.Delay(() => singleton$1.TryWith(singleton$1.Delay(() => singleton$1.Bind(_.artifacts.Create(repository, baseSha), (_arg) => {
-        const request = new RunnerRequest(RepositoryModule_fullName(repository), baseSha, _arg);
-        return singleton$1.Bind(_.runner.Run(request), (_arg_1) => {
-            const result = _arg_1;
-            const matchValue = result.Status;
-            const matchValue_1 = result.LockFile;
-            let matchResult = undefined;
-            switch (matchValue.tag) {
-                case /* NoChange */ 0: {
-                    matchResult = 0;
-                    break;
-                }
-                case /* Updated */ 1: {
-                    if (matchValue_1 != null) {
-                        matchResult = 1;
-                    }
-                    else {
-                        matchResult = 2;
-                    }
-                    break;
-                }
-                default:
-                    matchResult = 2;
-            }
-            switch (matchResult) {
-                case 0:
-                    return singleton$1.Return(UpdateOutcome.Unchanged);
-                case 1: {
-                    const lockFile = value(matchValue_1);
-                    return singleton$1.Bind(_.github.TryGetPublication(repository), (_arg_2) => {
-                        const publish = new PublishUpdate(repository, baseSha, _arg_2, "paketabot/weekly", "paket.lock", lockFile, "chore(deps): update Paket dependencies", PullRequestBody_render(result.Changes));
-                        return singleton$1.Bind(_.github.Publish(publish), (_arg_3) => singleton$1.Return(UpdateOutcome_Published(_arg_3)));
-                    });
-                }
-                default:
-                    return singleton$1.Return(UpdateOutcome_RunFailed(result.Messages));
-            }
-        });
-    })), (_arg_4) => singleton$1.Return(UpdateOutcome_RunFailed(singleton(_arg_4.message)))));
-}
-
-class GitArtifactStore {
-    workspace;
-    root;
-    constructor(workspace, root) {
-        this.workspace = workspace;
-        this.root = root;
-    }
-    Create(repository, sha) {
-        const _ = this;
-        return singleton$1.Delay(() => {
-            const directory = join$1(_.root, repository.Owner, repository.Name, sha);
-            return singleton$1.Bind(awaitPromise(mkdir(directory, {
-                recursive: true,
-            })), () => {
-                const path = join$1(directory, "repository.tar.gz");
-                const options = {
-                    cwd: _.workspace,
-                    timeout: 60000,
-                    maxBuffer: 1048576,
-                };
-                return singleton$1.Bind(awaitPromise(execFile("git", ["archive", "--format=tar.gz", "--prefix=repository/", "-o", path, sha], options)), (_arg_1) => singleton$1.Return(path));
-            });
-        });
-    }
-}
-function GitArtifactStore_$ctor_Z384F8060(workspace, root) {
-    return new GitArtifactStore(workspace, root);
-}
-
-// Unicode 13.0.0 codepoint ranges (delta encoded) and general categories.
-// Integer delta values are offset by 35 and stored as Unicode characters.
-const rangeDeltas = "#C$&$&$$$$$$%-%&%=$$$$$$=$$$$D$$'$$$$$$$$$$$$%$$%$$$$&$:$*;$+$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$%$$$$$$$$$$$$$$$%$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$%$$$$&%$$$%$&%'$%$&&%$%$$$$$%$$%$$%$&$$$%%$$&'$$$$$$$$$$$$$$$$$$$$$$$$%$$$$$$$$$$$$$$$$$%$$$$$&$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$*%$%%$$'$$$$$$$$h$>5'/1(*$$$4$$$$$$$$%$&$$'%$$&$$$%$4$,F$%&&$$$$$$$$$$$$$$$$$$$$$$$($$$$$%%VS$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$(%$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$%$$$$$$$$$$$$%$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$I%$)L$$%%$$P$$$%$%$$+>''%.)&%$%%.$$$%C$-8-'%$$$*$$)%%$'%-&%$1$$$$A>%|.$1-D,%$&$%$%9'$,$&$(%2$<&%$$.X8$5.2$C$Y$$$$&+'$%$*-%%-$$2$%$+%%%9$*$$&'%$$&'%%%%$$+$'%$&%%-%%)$$$$$%%$$)'%%9$*$%$%$%%$$&%'%%&&$*'$$*-%&$$-%$$,$&$9$*$%$(%$$&($%$$%$%$2%%%-$$*$)$$%$+%%%9$*$%$(%$$$$$'%%%%$*%$'%$&%%-$$)-$$$)&&$'&%$$$%&%&&&/'%$%&&$&$%$)$1-&)$$($&$+$&$:$3&$&'$&$'*%$&(%%%-*$*$$$%$+$&$:$-$(%$$$$($$%$%%*%*$$%%%-$%0%%,$&$L%$&'$&$&$$$'&$*&%%-,$)$$%$5&;$,$$%*&$'&&$$$+)-%%$/S$%*'$)$+$-%H%$$$($;$$$-$%,$%($$$)%-%'C$&2$$&%)--$$$$$$$$$$%+$G'1$($%(.$G$+$)$%('%HN%'$)$%%%$-))%%'&$&%*&'0$%%)$$$-&$%I$$($%N$$&Ŭ$'%*$$$'%L$'%D$'%*$$$'%2$\\$'%f%&,7&3-)y%)%$ʏ$$4$=$$&n&&+*0$'&.5&%,5%/0$&$%/W%$*+$%.&$&$$$%-)-))$'&$$-)F$X*(%E$$(i-B$&'%&'%$)&'$&%-A%(.O'=)-$&E:%%$%%X$$$*$$$$%+)-%$-)-)*$)%1$%b'$R$$($$($%*'-*-,,&%$A$'%%$&%-O$$%&$$&%+'G++%%&(-&&-A)%,*N%&++&$0$*'$)$%$%$(Ob0$EH]$($$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$,$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$,+)%)%++++)%)%+$$$$$$$$++1%++++++($%'$$$&&$%'$&'%%'$&+(&%&$%'$%$.()%$$$%$$$+$$($,$$'%&$$$.$$$-$($-$$%)&$$$-&$$$0&C30'$&/2%$'$%$&%&$$$%$()$$$$$$'$$'$'$%%%($'$$%$$3F$$'$%'((%'$%$%$*$B%%$$$Bį+$$$$7%*$$t$A<K)h<.8_q9Ú$,$Y+$ě$$$$$$$$$$$$$$AO($$B$$$$$$$$$$3ģ¦$$$$$$$$$$$$$$$$$$$$$$b$$$$C$$ĥS8%)J%C$R$R$$$&%$$$$$$'$$%$)%&$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$%)$$$$&$$('$%I$$($%[*$$1$:,*$*$*$*$*$*$*$*$C%$$$$&$$$$$,$%$$$$%$$$$$$$$$$($-%'$$$0%$P=$|/ù=/'$&$$$$$$$$$$$$$$%$$$$$$$$$$%$,'%$(%&$$$%$y%%%%$$}$&$(N$$%'-CG/3B$-A+$2C-J2ţ᧣c删&8$Қ&Z,K)%į$&3-%7$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$&$-$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$%%i-%)+:,%$$$$$$$$$$$$$&$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$+$$$$%$$$$$$$$$$%$$$$$$$$&$$$$$$$$$$$$$$$$$$$$($($$$$$$$$$$$%$$'$$$M$$$%$*$&$'$:%%$'$&)%$$)W'+%U3%+%-)5)&$$%$-?+%:.%.$@&&$R$%'%%&0$$-'%($$,-($L)%%%%,&$+$$%-%'3$)&$$$$U$$&%%(%$$$;%$%.$%%%$%$$-)%)%),*$*$N$',$%'sF%$%$%$$$%-)⯇/:'T'ࠣᤣƑ%I*/(($$-$0$($$$%$%$34Ǝ$$3c%YK/$$%3*$$$)3$%%$$$$$$$$$$$$$$$$%$$'&&$'$$$$$$$&$$&$$$%'($ª%$$&$&$$$$$$%-%&%=$$$$$$=$$$$$$$$$%-$P%B&)%)%)%&&%$$$%$$'%-&%%/$=$6$%$2%1E(&'P&,X'4%&$0&$RP$¥@&T2$>'C',7$+$(I((A$$G'+$(MKKq%-)G'G'K+W.$³Ś,9-+»)%$$O$%&$%:$$+:%*B+,S6$%((9)&$=($c['%%3%Q$&$%(''$&$@%&'$,*,*@%$@&C+$?%'(*,Y&*9%+6(+5*'/*slZV0V*)G'+-ŉB$M$%$%%q@-$+9.'(y8*7:,$$$X2*'7-2&$P&'%%%$'.$%<*-)&G($+$-'$%$+F$%$,%$S&,%'''$$$-$$$&$7.5$<&&%$$%)$d*$$$'$2$-$)R$&+(-)%%$+%%%9$*$%$($%$%$'%%%&%$)$((%%*&(®X&+%&$$'(-%$$$&AS&)$$'%$%%$$+-ÉR&'%'%$%:'%ES&+%$$%&$.-)06N$$$%)$$$*-Y>%&%'$('-%&$ãO&,$%$CC-,/+%$%+$%$;)$%%%$$$$$$$&,-i+%J&'%%'$$$$$>$-K)$$'+$+$)%&Q0$%&$(@\\Ī,$H$*$)$$$(--6&%A%9$$*$%$%l*$%$I)&$$%$*$$+-))$%$C($%$%$$$$*-ř6%%%Ú$28+'40$ν$(.ç૟ђ$,࿪ɪ⇜ɜ*B$-'%A%($-S*(''$$--$*$8(6˓CC:'n'$$Z*'0c%$$$.%1᠛+ӹM,⌚łT&4'+Ưध(0&,*-%$%$'፿ę-J%_%&&)++%*A'^:e&$½7/z,<ª===*$5==$$%%$%%%'$+'$$$*$.==%$'%+$*$=%$'$($$&*$============?%<$<$)<$<$)<$<$)<$<$)<$<$)$$%UȣZ'U+$1$%(2($2ճ*$4%*$%$(øP&**%-'$$ƓO'-($ԣè%,*LEE*$'-'%̴^$&$'oP$2å'$>$%$$%$$-$'$$$$)$'$$$$$$&$%$$%$$$$$$$$$$%$$%'$*$'$'$$$-$4(&$($4W%ıO'/2%2$2$H-0Ä[@0O',*%1)½Ğ(˻+0&0&/|*/7/'[+-)K+A%%q$u$ª/1%(&&(*,<**,&0*L¶$ZH-Щ꜁Eၘ.ā%ᚥ1ᵔూɁ؅፮򮳙$A£ē︳𐀡%𐀡";
-const categories = "1.;=;78;<;6;+;<;#7;8>5>$7<8<1.;=?;>?'9<2?>?<->$;>-':-;#<#$<$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$'#$'#%$#%$#%$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#%$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$'$&>&>&>&>&>(#$#$&>#$@&$;#@>#;#@#@#$#@#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$<#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$?(*#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$@#@&;$;6@?=@(6(;(;(;(@'@';@2<;=;?(;2@;'&'(+;'(';'(2?(&(?('+'?';@2'('(@'('@+'(&?;&@(='(&(&(&(@;@'(@;@'@'@'@(2()'()(')()()'('(;+;&'()@'@'@'@'@'@'@(')(@)@)('@)@'@'(@+'=-?=';(@()@'@'@'@'@'@'@'@(@)(@(@(@(@'@'@+('(;@()@'@'@'@'@'@'@(')(@()@)(@'@'(@+;=@'(@()@'@'@'@'@'@'@(')()(@)@)(@()@'@'(@+?'-@('@'@'@'@'@'@'@'@'@'@)()@)@)(@'@)@+-?=?@()('@'@'@'@'()@(@(@(@'@'(@+@;-?'();'@'@'@'@'@(')()@()@)(@)@'@'(@+@'@()'@'@'(')(@)@)('?@')-'(@+-?'@()@'@'@'@'@'@(@)(@(@)@+@);@'('(@='&(;+;@'@'@'@'@'@'('('@'@&@(@+@'@'?;?;?(?+-?(?(?(7878)'@'@()(;('(@(@?(?@?;?;@')()()()('+;')('(')')'('()()(')+)(?#@#@#@$;&$'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@(;-@'?@#@$@6'?;'.'78@';,'@'@'(@'(;@'(@'@'@(@'()()()(;&;='(@+@-@;6;(2@+@'&'@'('('@'@'@()()@)()(@?@;+'@'@'@'@+-@?'()(@;')()(@()()()(@(+@+@;&;@(*(@()'()()()()'@+;?(?@()')()()('+'()()()()@;')()(@;+@'+'&;$@#@#;@(;()('('(')('@$&$&$&(@(#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$@#@$#$#$@#@$@#@#@#@#$#$@$%$%$%$@$#%>$>$@$#%>$@$#@>$#>@$@$#%>@.26;9:79:79;/02.;9:;5;<78;<;5;.2@2-&@-<78&-<78@&@=@(*(*(@?#?#?$#$#$?#?<#?#?#?#?#?$#$'$?$#<#$?<?$?-,#$,-?@<?<?<?<?<?<?<?<?<?<?7878?<?78?<?<?<?@?@-?-?<?<?<?<?78787878787878-?<78<7878787878<?<7878787878787878787878<7878<78<?<?<?@?@?#@$@#$#$#$#$#$#$#$#$&#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$?#$#$(#$@;-;$@$@$@'@&;@('@'@'@'@'@'@'@'@'@(;9:9:;9:;9:;6;6;9:;9:78787878;&;6;6;7;?;@?@?@?@?@.;?&',7878787878?78787878678?,()6&?,&';?@'@(>&'6';&'@'@'@?-?'?@'?@-?-?-?-?-?'?'@'&'@?@'&;'&;'+'@#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$'(*;(;&#$#$#$#$#$#$#$#$#$#$#$#$#$#$&(',(;@>&>#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$&$#$#$#$#$#$#$#$&>#$#$'#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$#$@#$#$#$@#$'&$'('('(')()?(@-?=?@';@)')(@;+@(';';'(+'(;'()@;'@()'()()();@&+@;'(&'+'@'()()(@'('()@+@;'&'?')()'('('('('('@'&;')();'&)(@'@'@'@'@'@$>&$&>@$')()();)(@+@'@'@'@34'@'@$@$@'('<'@'@'@'@'@'>@'87@'@'@'=?@(;78;@(;657878787878787878;78;5;@;6787878;<6<@;=;@'@'@2@;=;78;<;6;+;<;#7;8>5>$7<8<78;78;'&'&'@'@'@'@'@=<>?=@?<?@2?@'@'@'@'@'@'@'@;@-@?,-?-?@?@?@?(@'@'@(-@'-@',',@'(@'@;'@';,@#$'@+@#@$@'@'@;@'@'@'@'@'@'@'@'@'@;-'?-'@-@'@'@-'-@;'@;@'@-'-@-'(@(@('@'@'@(@(-@;@'-;'-@'?'(@-;@'@;'@-'@-'@;@-@'@#@$@-'(@+@-@'@(6@'@'-'@'(-;@'-@'@)()'(;@-+@()')()(;2;@2@'@+@('()(@+;')'@'(;'@()')()';(;)(+';';@-@'@')()()(;(@'@'@'@'@';@'()(@+@()@'@'@'@'@'@'@(')()@)@)@'@)@')@(@(@')()()(';+;@;('@')()()()(';'@+@')(@)()(;'(@')()()(;'@+@;@'()()()('@+@'@()()(@+-;?@')()(;@#$+-@'@'@'@'@')@)@()(')')(;@+@'@')(@()(';')@'('()'(;(@'()('()(;';@'@'@')(@()(';@+-@;'@(@)()()(@'@'@'(@(@(@('(@+@'@'@')@(@)()('@+@'();@'@-?=?@;'@,@;@'@'@2@'@'@'@+@;@'@(;@'(;?&;?@+@-@'@'@#$-;@'@(')@(&@&;&(@)@'@'@'@'@'@'@'@'@'@'@'@?(;2@?@?@?)(?)2(?(?(?@?(?@-@?@-@#$#$@$#$#@#@#@#@#@#$@$@$@$#$#@#@#@#@$#@#@#@#@#@$#$#$#$#$#$#$@#<$<$#<$<$#<$<$#<$<$#<$<$#$@+?(?(?(?(?;@(@(@(@(@(@(@(@'@(&@+@'?@'(+@=@'@-(@#$(&@+@;@-?-=-@-?-@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@'@<@?@?@?@?@?@?@-?@?@?@?@?@?@?>?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@?@+@'@'@'@'@'@'@'@2@2@(@4@4@";
-
-function getCategoryFunc() {
-    // unpack Unicode codepoint ranges (delta encoded) and general categories
-    const offset = 35; // offsets unprintable characters
-    const a1 = [...rangeDeltas].map((ch) => (ch.codePointAt(0) ?? 0) - offset);
-    const a2 = [...categories].map((ch) => (ch.codePointAt(0) ?? 0) - offset);
-    const codepoints = new Uint32Array(a1);
-    const categories$1 = new Uint8Array(a2);
-    for (let i = 1; i < codepoints.length; ++i) {
-        codepoints[i] += codepoints[i - 1];
-    }
-    // binary search in unicode ranges
-    return (cp) => {
-        let hi = codepoints.length;
-        let lo = 0;
-        while (hi - lo > 1) {
-            const mid = Math.floor((hi + lo) / 2);
-            const test = codepoints[mid];
-            if (cp < test) {
-                hi = mid;
-            }
-            else if (cp === test) {
-                hi = lo = mid;
-                break;
-            }
-            else if (test < cp) {
-                lo = mid;
-            }
-        }
-        return categories$1[lo];
-    };
-}
-const UnicodeCategory = {
-    UppercaseLetter: 0};
-const isUpperMask = 1 << UnicodeCategory.UppercaseLetter;
-const unicodeCategoryFunc = getCategoryFunc();
-function charCodeAt(s, index) {
-    if (index < s.length) {
-        return s.charCodeAt(index);
-    }
-    else {
-        throw new Exception("Index out of range.");
-    }
-}
-const isUpper = (s) => isUpper2(s, 0);
-function getUnicodeCategory2(s, index) {
-    const cp = charCodeAt(s, index);
-    return unicodeCategoryFunc(cp);
-}
-function isUpper2(s, index) {
-    const test = 1 << getUnicodeCategory2(s, index);
-    return (test & isUpperMask) !== 0;
-}
-
-/**
- * Lowercase the first character; leave the rest alone.
- */
-function lowerFirst(name) {
-    if (name.length === 0) {
-        return name;
-    }
-    else {
-        return name[0].toLowerCase() + name.slice(1, name.length);
-    }
-}
-/**
- * Convert a snake_case name back to PascalCase.
- */
-function fromSnakeCase(name) {
-    return join("", map$2((part) => {
-        if (part.length === 0) {
-            return part;
-        }
-        else {
-            return part[0].toUpperCase() + part.slice(1, part.length);
-        }
-    }, split(name, ["_"], undefined, 0)));
-}
-/**
- * True if the name contains any uppercase letter (i.e., looks like Pascal/camelCase
- * rather than snake_case). Used to decide whether to convert before applying a rule.
- */
-function hasUpper(name) {
-    return exists(isUpper, name.split(""));
-}
-function toCanonicalPascal(name) {
-    if (hasUpper(name)) {
-        return name;
-    }
-    else {
-        return fromSnakeCase(name);
-    }
-}
-
-class MapTreeLeaf$2 {
-    v;
-    k;
-    constructor(k, v) {
-        this.k = k;
-        this.v = v;
-    }
-}
-function MapTreeLeaf$2_$ctor_5BDDA1(k, v) {
-    return new MapTreeLeaf$2(k, v);
-}
-function MapTreeLeaf$2__get_Key(_) {
-    return _.k;
-}
-function MapTreeLeaf$2__get_Value(_) {
-    return _.v;
-}
-class MapTreeNode$2 extends MapTreeLeaf$2 {
-    right;
-    left;
-    h;
-    constructor(k, v, left, right, h) {
-        super(k, v);
-        this.left = left;
-        this.right = right;
-        this.h = (h | 0);
-    }
-}
-function MapTreeNode$2_$ctor_Z39DE9543(k, v, left, right, h) {
-    return new MapTreeNode$2(k, v, left, right, h);
-}
-function MapTreeNode$2__get_Left(_) {
-    return _.left;
-}
-function MapTreeNode$2__get_Right(_) {
-    return _.right;
-}
-function MapTreeNode$2__get_Height(_) {
-    return _.h | 0;
-}
-function MapTreeModule_empty() {
-    return undefined;
-}
-function MapTreeModule_sizeAux(acc_mut, m_mut) {
-    MapTreeModule_sizeAux: while (true) {
-        const acc = acc_mut, m = m_mut;
-        if (m != null) {
-            const m2 = value(m);
-            if (m2 instanceof MapTreeNode$2) {
-                const mn = m2;
-                acc_mut = MapTreeModule_sizeAux(acc + 1, MapTreeNode$2__get_Left(mn));
-                m_mut = MapTreeNode$2__get_Right(mn);
-                continue MapTreeModule_sizeAux;
-            }
-            else {
-                return (acc + 1) | 0;
-            }
-        }
-        else {
-            return acc | 0;
-        }
-    }
-}
-function MapTreeModule_size(x) {
-    return MapTreeModule_sizeAux(0, x) | 0;
-}
-function MapTreeModule_mk(l, k, v, r) {
-    let mn = undefined, mn_1 = undefined;
-    let hl;
-    const m = l;
-    if (m != null) {
-        const m2 = value(m);
-        hl = ((m2 instanceof MapTreeNode$2) ? ((mn = m2, MapTreeNode$2__get_Height(mn))) : 1);
-    }
-    else {
-        hl = 0;
-    }
-    let hr;
-    const m_1 = r;
-    if (m_1 != null) {
-        const m2_1 = value(m_1);
-        hr = ((m2_1 instanceof MapTreeNode$2) ? ((mn_1 = m2_1, MapTreeNode$2__get_Height(mn_1))) : 1);
-    }
-    else {
-        hr = 0;
-    }
-    const m_2 = ((hl < hr) ? hr : hl) | 0;
-    if (m_2 === 0) {
-        return MapTreeLeaf$2_$ctor_5BDDA1(k, v);
-    }
-    else {
-        return MapTreeNode$2_$ctor_Z39DE9543(k, v, l, r, m_2 + 1);
-    }
-}
-function MapTreeModule_rebalance(t1, k, v, t2) {
-    let mn = undefined, mn_1 = undefined, m_2 = undefined, m2_2 = undefined, mn_2 = undefined, m_3 = undefined, m2_3 = undefined, mn_3 = undefined;
-    let t1h;
-    const m = t1;
-    if (m != null) {
-        const m2 = value(m);
-        t1h = ((m2 instanceof MapTreeNode$2) ? ((mn = m2, MapTreeNode$2__get_Height(mn))) : 1);
-    }
-    else {
-        t1h = 0;
-    }
-    let t2h;
-    const m_1 = t2;
-    if (m_1 != null) {
-        const m2_1 = value(m_1);
-        t2h = ((m2_1 instanceof MapTreeNode$2) ? ((mn_1 = m2_1, MapTreeNode$2__get_Height(mn_1))) : 1);
-    }
-    else {
-        t2h = 0;
-    }
-    if (t2h > (t1h + 2)) {
-        const matchValue = value(t2);
-        if (matchValue instanceof MapTreeNode$2) {
-            const t2$0027 = matchValue;
-            if (((m_2 = MapTreeNode$2__get_Left(t2$0027), (m_2 != null) ? ((m2_2 = value(m_2), (m2_2 instanceof MapTreeNode$2) ? ((mn_2 = m2_2, MapTreeNode$2__get_Height(mn_2))) : 1)) : 0)) > (t1h + 1)) {
-                const matchValue_1 = value(MapTreeNode$2__get_Left(t2$0027));
-                if (matchValue_1 instanceof MapTreeNode$2) {
-                    const t2l = matchValue_1;
-                    return MapTreeModule_mk(MapTreeModule_mk(t1, k, v, MapTreeNode$2__get_Left(t2l)), MapTreeLeaf$2__get_Key(t2l), MapTreeLeaf$2__get_Value(t2l), MapTreeModule_mk(MapTreeNode$2__get_Right(t2l), MapTreeLeaf$2__get_Key(t2$0027), MapTreeLeaf$2__get_Value(t2$0027), MapTreeNode$2__get_Right(t2$0027)));
-                }
-                else {
-                    throw new Exception("internal error: Map.rebalance");
-                }
-            }
-            else {
-                return MapTreeModule_mk(MapTreeModule_mk(t1, k, v, MapTreeNode$2__get_Left(t2$0027)), MapTreeLeaf$2__get_Key(t2$0027), MapTreeLeaf$2__get_Value(t2$0027), MapTreeNode$2__get_Right(t2$0027));
-            }
-        }
-        else {
-            throw new Exception("internal error: Map.rebalance");
-        }
-    }
-    else if (t1h > (t2h + 2)) {
-        const matchValue_2 = value(t1);
-        if (matchValue_2 instanceof MapTreeNode$2) {
-            const t1$0027 = matchValue_2;
-            if (((m_3 = MapTreeNode$2__get_Right(t1$0027), (m_3 != null) ? ((m2_3 = value(m_3), (m2_3 instanceof MapTreeNode$2) ? ((mn_3 = m2_3, MapTreeNode$2__get_Height(mn_3))) : 1)) : 0)) > (t2h + 1)) {
-                const matchValue_3 = value(MapTreeNode$2__get_Right(t1$0027));
-                if (matchValue_3 instanceof MapTreeNode$2) {
-                    const t1r = matchValue_3;
-                    return MapTreeModule_mk(MapTreeModule_mk(MapTreeNode$2__get_Left(t1$0027), MapTreeLeaf$2__get_Key(t1$0027), MapTreeLeaf$2__get_Value(t1$0027), MapTreeNode$2__get_Left(t1r)), MapTreeLeaf$2__get_Key(t1r), MapTreeLeaf$2__get_Value(t1r), MapTreeModule_mk(MapTreeNode$2__get_Right(t1r), k, v, t2));
-                }
-                else {
-                    throw new Exception("internal error: Map.rebalance");
-                }
-            }
-            else {
-                return MapTreeModule_mk(MapTreeNode$2__get_Left(t1$0027), MapTreeLeaf$2__get_Key(t1$0027), MapTreeLeaf$2__get_Value(t1$0027), MapTreeModule_mk(MapTreeNode$2__get_Right(t1$0027), k, v, t2));
-            }
-        }
-        else {
-            throw new Exception("internal error: Map.rebalance");
-        }
-    }
-    else {
-        return MapTreeModule_mk(t1, k, v, t2);
-    }
-}
-function MapTreeModule_add(comparer, k, v, m) {
-    if (m != null) {
-        const m2 = value(m);
-        const c = comparer.Compare(k, MapTreeLeaf$2__get_Key(m2)) | 0;
-        if (m2 instanceof MapTreeNode$2) {
-            const mn = m2;
-            if (c < 0) {
-                return MapTreeModule_rebalance(MapTreeModule_add(comparer, k, v, MapTreeNode$2__get_Left(mn)), MapTreeLeaf$2__get_Key(mn), MapTreeLeaf$2__get_Value(mn), MapTreeNode$2__get_Right(mn));
-            }
-            else if (c === 0) {
-                return MapTreeNode$2_$ctor_Z39DE9543(k, v, MapTreeNode$2__get_Left(mn), MapTreeNode$2__get_Right(mn), MapTreeNode$2__get_Height(mn));
-            }
-            else {
-                return MapTreeModule_rebalance(MapTreeNode$2__get_Left(mn), MapTreeLeaf$2__get_Key(mn), MapTreeLeaf$2__get_Value(mn), MapTreeModule_add(comparer, k, v, MapTreeNode$2__get_Right(mn)));
-            }
-        }
-        else if (c < 0) {
-            return MapTreeNode$2_$ctor_Z39DE9543(k, v, MapTreeModule_empty(), m, 2);
-        }
-        else if (c === 0) {
-            return MapTreeLeaf$2_$ctor_5BDDA1(k, v);
-        }
-        else {
-            return MapTreeNode$2_$ctor_Z39DE9543(k, v, m, MapTreeModule_empty(), 2);
-        }
-    }
-    else {
-        return MapTreeLeaf$2_$ctor_5BDDA1(k, v);
-    }
-}
-function MapTreeModule_tryFind(comparer_mut, k_mut, m_mut) {
-    MapTreeModule_tryFind: while (true) {
-        const comparer = comparer_mut, k = k_mut, m = m_mut;
-        if (m != null) {
-            const m2 = value(m);
-            const c = comparer.Compare(k, MapTreeLeaf$2__get_Key(m2)) | 0;
-            if (c === 0) {
-                return some(MapTreeLeaf$2__get_Value(m2));
-            }
-            else if (m2 instanceof MapTreeNode$2) {
-                const mn = m2;
-                comparer_mut = comparer;
-                k_mut = k;
-                m_mut = ((c < 0) ? MapTreeNode$2__get_Left(mn) : MapTreeNode$2__get_Right(mn));
-                continue MapTreeModule_tryFind;
-            }
-            else {
-                return undefined;
-            }
-        }
-        else {
-            return undefined;
-        }
-    }
-}
-function MapTreeModule_find(comparer, k, m) {
-    const matchValue = MapTreeModule_tryFind(comparer, k, m);
-    if (matchValue == null) {
-        throw KeyNotFoundException_$ctor();
-    }
-    else {
-        return value(matchValue);
-    }
-}
-function MapTreeModule_mem(comparer_mut, k_mut, m_mut) {
-    MapTreeModule_mem: while (true) {
-        const comparer = comparer_mut, k = k_mut, m = m_mut;
-        if (m != null) {
-            const m2 = value(m);
-            const c = comparer.Compare(k, MapTreeLeaf$2__get_Key(m2)) | 0;
-            if (m2 instanceof MapTreeNode$2) {
-                const mn = m2;
-                if (c < 0) {
-                    comparer_mut = comparer;
-                    k_mut = k;
-                    m_mut = MapTreeNode$2__get_Left(mn);
-                    continue MapTreeModule_mem;
-                }
-                else if (c === 0) {
-                    return true;
-                }
-                else {
-                    comparer_mut = comparer;
-                    k_mut = k;
-                    m_mut = MapTreeNode$2__get_Right(mn);
-                    continue MapTreeModule_mem;
-                }
-            }
-            else {
-                return c === 0;
-            }
-        }
-        else {
-            return false;
-        }
-    }
-}
-function MapTreeModule_iterOpt(f_mut, m_mut) {
-    MapTreeModule_iterOpt: while (true) {
-        const f = f_mut, m = m_mut;
-        if (m != null) {
-            const m2 = value(m);
-            if (m2 instanceof MapTreeNode$2) {
-                const mn = m2;
-                MapTreeModule_iterOpt(f, MapTreeNode$2__get_Left(mn));
-                f(MapTreeLeaf$2__get_Key(mn), MapTreeLeaf$2__get_Value(mn));
-                f_mut = f;
-                m_mut = MapTreeNode$2__get_Right(mn);
-                continue MapTreeModule_iterOpt;
-            }
-            else {
-                f(MapTreeLeaf$2__get_Key(m2), MapTreeLeaf$2__get_Value(m2));
-            }
-        }
-        break;
-    }
-}
-function MapTreeModule_iter(f, m) {
-    MapTreeModule_iterOpt(f, m);
-}
-function MapTreeModule_foldOpt(f_mut, x_mut, m_mut) {
-    MapTreeModule_foldOpt: while (true) {
-        const f = f_mut, x = x_mut, m = m_mut;
-        if (m != null) {
-            const m2 = value(m);
-            if (m2 instanceof MapTreeNode$2) {
-                const mn = m2;
-                f_mut = f;
-                x_mut = f(MapTreeModule_foldOpt(f, x, MapTreeNode$2__get_Left(mn)), MapTreeLeaf$2__get_Key(mn), MapTreeLeaf$2__get_Value(mn));
-                m_mut = MapTreeNode$2__get_Right(mn);
-                continue MapTreeModule_foldOpt;
-            }
-            else {
-                return f(x, MapTreeLeaf$2__get_Key(m2), MapTreeLeaf$2__get_Value(m2));
-            }
-        }
-        else {
-            return x;
-        }
-    }
-}
-function MapTreeModule_fold(f, x, m) {
-    return MapTreeModule_foldOpt(f, x, m);
-}
-function MapTreeModule_copyToArray(m, arr, i) {
-    let j = i;
-    MapTreeModule_iter((x, y) => {
-        setItem(arr, j, [x, y]);
-        j = ((j + 1) | 0);
-    }, m);
-}
-function MapTreeModule_ofList(comparer, l) {
-    return fold$1((acc, tupledArg) => MapTreeModule_add(comparer, tupledArg[0], tupledArg[1], acc), MapTreeModule_empty(), l);
-}
-function MapTreeModule_mkFromEnumerator(comparer_mut, acc_mut, e_mut) {
-    MapTreeModule_mkFromEnumerator: while (true) {
-        const comparer = comparer_mut, acc = acc_mut, e = e_mut;
-        if (e["System.Collections.IEnumerator.MoveNext"]()) {
-            const patternInput = e["System.Collections.Generic.IEnumerator`1.get_Current"]();
-            comparer_mut = comparer;
-            acc_mut = MapTreeModule_add(comparer, patternInput[0], patternInput[1], acc);
-            e_mut = e;
-            continue MapTreeModule_mkFromEnumerator;
-        }
-        else {
-            return acc;
-        }
-    }
-}
-function MapTreeModule_ofArray(comparer, arr) {
-    let res = MapTreeModule_empty();
-    for (let idx = 0; idx <= (arr.length - 1); idx++) {
-        const forLoopVar = item(idx, arr);
-        res = MapTreeModule_add(comparer, forLoopVar[0], forLoopVar[1], res);
-    }
-    return res;
-}
-function MapTreeModule_ofSeq(comparer, c) {
-    if (isArrayLike(c)) {
-        return MapTreeModule_ofArray(comparer, c);
-    }
-    else if (c instanceof FSharpList) {
-        return MapTreeModule_ofList(comparer, c);
-    }
-    else {
-        const ie = getEnumerator(c);
-        try {
-            return MapTreeModule_mkFromEnumerator(comparer, MapTreeModule_empty(), ie);
-        }
-        finally {
-            disposeSafe(ie);
-        }
-    }
-}
-/**
- * Imperative left-to-right iterators.
- */
-class MapTreeModule_MapIterator$2 extends Record {
-    stack;
-    started;
-    constructor(stack, started) {
-        super();
-        this.stack = stack;
-        this.started = started;
-    }
-}
-function MapTreeModule_collapseLHS(stack_mut) {
-    MapTreeModule_collapseLHS: while (true) {
-        const stack = stack_mut;
-        if (!isEmpty(stack)) {
-            const rest = tail(stack);
-            const m = head(stack);
-            if (m != null) {
-                const m2 = value(m);
-                if (m2 instanceof MapTreeNode$2) {
-                    const mn = m2;
-                    stack_mut = ofArrayWithTail([MapTreeNode$2__get_Left(mn), MapTreeLeaf$2_$ctor_5BDDA1(MapTreeLeaf$2__get_Key(mn), MapTreeLeaf$2__get_Value(mn)), MapTreeNode$2__get_Right(mn)], rest);
-                    continue MapTreeModule_collapseLHS;
-                }
-                else {
-                    return stack;
-                }
-            }
-            else {
-                stack_mut = rest;
-                continue MapTreeModule_collapseLHS;
-            }
-        }
-        else {
-            return empty$1();
-        }
-    }
-}
-function MapTreeModule_mkIterator(m) {
-    return new MapTreeModule_MapIterator$2(MapTreeModule_collapseLHS(singleton(m)), false);
-}
-function MapTreeModule_notStarted() {
-    throw new Exception("enumeration not started");
-}
-function MapTreeModule_alreadyFinished() {
-    throw new Exception("enumeration already finished");
-}
-function MapTreeModule_current(i) {
-    if (i.started) {
-        const matchValue = i.stack;
-        if (!isEmpty(matchValue)) {
-            if (head(matchValue) != null) {
-                const m = value(head(matchValue));
-                if (m instanceof MapTreeNode$2) {
-                    throw new Exception("Please report error: Map iterator, unexpected stack for current");
-                }
-                else {
-                    return [MapTreeLeaf$2__get_Key(m), MapTreeLeaf$2__get_Value(m)];
-                }
-            }
-            else {
-                throw new Exception("Please report error: Map iterator, unexpected stack for current");
-            }
-        }
-        else {
-            return MapTreeModule_alreadyFinished();
-        }
-    }
-    else {
-        return MapTreeModule_notStarted();
-    }
-}
-function MapTreeModule_moveNext(i) {
-    if (i.started) {
-        const matchValue = i.stack;
-        if (!isEmpty(matchValue)) {
-            if (head(matchValue) != null) {
-                const m = value(head(matchValue));
-                if (m instanceof MapTreeNode$2) {
-                    throw new Exception("Please report error: Map iterator, unexpected stack for moveNext");
-                }
-                else {
-                    i.stack = MapTreeModule_collapseLHS(tail(matchValue));
-                    return !isEmpty(i.stack);
-                }
-            }
-            else {
-                throw new Exception("Please report error: Map iterator, unexpected stack for moveNext");
-            }
-        }
-        else {
-            return false;
-        }
-    }
-    else {
-        i.started = true;
-        return !isEmpty(i.stack);
-    }
-}
-function MapTreeModule_mkIEnumerator(m) {
-    let i = MapTreeModule_mkIterator(m);
-    return {
-        "System.Collections.Generic.IEnumerator`1.get_Current"() {
-            return MapTreeModule_current(i);
-        },
-        "System.Collections.IEnumerator.get_Current"() {
-            return MapTreeModule_current(i);
-        },
-        "System.Collections.IEnumerator.MoveNext"() {
-            return MapTreeModule_moveNext(i);
-        },
-        "System.Collections.IEnumerator.Reset"() {
-            i = MapTreeModule_mkIterator(m);
-        },
-        Dispose() {
-        },
-    };
-}
-class FSharpMap {
-    tree;
-    comparer;
-    constructor(comparer, tree) {
-        this.comparer = comparer;
-        this.tree = tree;
-    }
-    GetHashCode() {
-        const this$ = this;
-        return FSharpMap__ComputeHashCode(this$) | 0;
-    }
-    Equals(other) {
-        const this$ = this;
-        if (other instanceof FSharpMap) {
-            const that = other;
-            const e1 = getEnumerator(this$);
-            try {
-                const e2 = getEnumerator(that);
-                try {
-                    const loop = () => {
-                        const m1 = e1["System.Collections.IEnumerator.MoveNext"]();
-                        if (m1 === e2["System.Collections.IEnumerator.MoveNext"]()) {
-                            if (!m1) {
-                                return true;
-                            }
-                            else {
-                                const e1c = e1["System.Collections.Generic.IEnumerator`1.get_Current"]();
-                                const e2c = e2["System.Collections.Generic.IEnumerator`1.get_Current"]();
-                                if (equals$1(e1c[0], e2c[0]) && equals$1(e1c[1], e2c[1])) {
-                                    return loop();
-                                }
-                                else {
-                                    return false;
-                                }
-                            }
-                        }
-                        else {
-                            return false;
-                        }
-                    };
-                    return loop();
-                }
-                finally {
-                    disposeSafe(e2);
-                }
-            }
-            finally {
-                disposeSafe(e1);
-            }
-        }
-        else {
-            return false;
-        }
-    }
-    toString() {
-        const this$ = this;
-        return ("map [" + join("; ", map$1((kv) => format("({0}, {1})", kv[0], kv[1]), this$))) + "]";
-    }
-    get [Symbol.toStringTag]() {
-        return "FSharpMap";
-    }
-    toJSON() {
-        const this$ = this;
-        return Array.from(this$);
-    }
-    GetEnumerator() {
-        const _ = this;
-        return MapTreeModule_mkIEnumerator(_.tree);
-    }
-    [Symbol.iterator]() {
-        return toIterator(getEnumerator(this));
-    }
-    "System.Collections.IEnumerable.GetEnumerator"() {
-        const _ = this;
-        return MapTreeModule_mkIEnumerator(_.tree);
-    }
-    CompareTo(other) {
-        let that = undefined;
-        const this$ = this;
-        return ((other instanceof FSharpMap) ? ((that = other, compareWith((kvp1, kvp2) => {
-            const c = this$.comparer.Compare(kvp1[0], kvp2[0]) | 0;
-            return ((c !== 0) ? c : compare$1(kvp1[1], kvp2[1])) | 0;
-        }, this$, that))) : 1) | 0;
-    }
-    "System.Collections.Generic.ICollection`1.Add2B595"(x) {
-        throw NotSupportedException_$ctor_Z721C83C5("Map cannot be mutated");
-    }
-    "System.Collections.Generic.ICollection`1.Clear"() {
-        throw NotSupportedException_$ctor_Z721C83C5("Map cannot be mutated");
-    }
-    "System.Collections.Generic.ICollection`1.Remove2B595"(x) {
-        throw NotSupportedException_$ctor_Z721C83C5("Map cannot be mutated");
-    }
-    "System.Collections.Generic.ICollection`1.Contains2B595"(x) {
-        const m = this;
-        return FSharpMap__ContainsKey(m, x[0]) && equals$1(FSharpMap__get_Item(m, x[0]), x[1]);
-    }
-    "System.Collections.Generic.ICollection`1.CopyToZ3B4C077E"(arr, i) {
-        const m = this;
-        MapTreeModule_copyToArray(m.tree, arr, i);
-    }
-    "System.Collections.Generic.ICollection`1.get_IsReadOnly"() {
-        return true;
-    }
-    "System.Collections.Generic.ICollection`1.get_Count"() {
-        const m = this;
-        return FSharpMap__get_Count(m) | 0;
-    }
-    "System.Collections.Generic.IReadOnlyCollection`1.get_Count"() {
-        const m = this;
-        return FSharpMap__get_Count(m) | 0;
-    }
-    get size() {
-        const m = this;
-        return FSharpMap__get_Count(m) | 0;
-    }
-    clear() {
-        throw new Exception("Map cannot be mutated");
-    }
-    delete(_arg) {
-        throw new Exception("Map cannot be mutated");
-    }
-    entries() {
-        const m = this;
-        return map$1((p) => [p[0], p[1]], m);
-    }
-    get(k) {
-        const m = this;
-        return FSharpMap__get_Item(m, k);
-    }
-    has(k) {
-        const m = this;
-        return FSharpMap__ContainsKey(m, k);
-    }
-    keys() {
-        const m = this;
-        return map$1((p) => p[0], m);
-    }
-    set(k, v) {
-        throw new Exception("Map cannot be mutated");
-    }
-    values() {
-        const m = this;
-        return map$1((p) => p[1], m);
-    }
-    forEach(f, thisArg) {
-        const m = this;
-        iterate((p) => {
-            f(p[1], p[0], m);
-        }, m);
-    }
-}
-function FSharpMap_$ctor(comparer, tree) {
-    return new FSharpMap(comparer, tree);
-}
-function FSharpMap_Empty(comparer) {
-    return FSharpMap_$ctor(comparer, MapTreeModule_empty());
-}
-function FSharpMap__get_Tree(m) {
-    return m.tree;
-}
-function FSharpMap__Add(m, key, value) {
-    return FSharpMap_$ctor(m.comparer, MapTreeModule_add(m.comparer, key, value, m.tree));
-}
-function FSharpMap__get_Item(m, key) {
-    return MapTreeModule_find(m.comparer, key, m.tree);
-}
-function FSharpMap__get_Count(m) {
-    return MapTreeModule_size(m.tree) | 0;
-}
-function FSharpMap__ContainsKey(m, key) {
-    return MapTreeModule_mem(m.comparer, key, m.tree);
-}
-function FSharpMap__TryFind(m, key) {
-    return MapTreeModule_tryFind(m.comparer, key, m.tree);
-}
-function FSharpMap__ComputeHashCode(this$) {
-    const combineHash = (x, y) => ((((x << 1) + y) + 631) | 0);
-    let res = 0;
-    const enumerator = getEnumerator(this$);
-    try {
-        while (enumerator["System.Collections.IEnumerator.MoveNext"]()) {
-            const activePatternResult = enumerator["System.Collections.Generic.IEnumerator`1.get_Current"]();
-            res = (combineHash(res, structuralHash(activePatternResult[0])) | 0);
-            res = (combineHash(res, structuralHash(activePatternResult[1])) | 0);
-        }
-    }
-    finally {
-        disposeSafe(enumerator);
-    }
-    return res | 0;
-}
-function add(key, value, table) {
-    return FSharpMap__Add(table, key, value);
-}
-function tryFind(key, table) {
-    return FSharpMap__TryFind(table, key);
-}
-function fold(folder, state, table) {
-    return MapTreeModule_fold(folder, state, FSharpMap__get_Tree(table));
-}
-function ofList(elements, comparer) {
-    return FSharpMap_$ctor(comparer, MapTreeModule_ofSeq(comparer, elements));
-}
-function ofArray(elements, comparer) {
-    return FSharpMap_$ctor(comparer, MapTreeModule_ofSeq(comparer, elements));
-}
-function empty(comparer) {
-    return FSharpMap_Empty(comparer);
-}
-
-function JsonValue_JString(stringValue) {
-    return new JsonValue(0, [stringValue]);
-}
-function JsonValue_JInt(intValue) {
-    return new JsonValue(1, [intValue]);
-}
-function JsonValue_JFloat(floatValue) {
-    return new JsonValue(2, [floatValue]);
-}
-function JsonValue_JBool(boolValue) {
-    return new JsonValue(3, [boolValue]);
-}
-function JsonValue_JArray(arrayValue) {
-    return new JsonValue(5, [arrayValue]);
-}
-function JsonValue_JMap(mapValue) {
-    return new JsonValue(6, [mapValue]);
-}
-class JsonValue extends Union {
-    constructor(tag, fields) {
-        super();
-        this.tag = tag;
-        this.fields = fields;
-    }
-    tag;
-    fields;
-    cases() {
-        return ["JString", "JInt", "JFloat", "JBool", "JNull", "JArray", "JMap"];
-    }
-    static JNull = new JsonValue(4, []);
-}
-class FieldError extends Record {
-    path;
-    message;
-    constructor(path, message) {
-        super();
-        this.path = path;
-        this.message = message;
-    }
-}
-function JsonSchemaValue_SVStr(Item) {
-    return new JsonSchemaValue(0, [Item]);
-}
-function JsonSchemaValue_SVList(Item) {
-    return new JsonSchemaValue(4, [Item]);
-}
-function JsonSchemaValue_SVDict(Item) {
-    return new JsonSchemaValue(5, [Item]);
-}
-class JsonSchemaValue extends Union {
-    constructor(tag, fields) {
-        super();
-        this.tag = tag;
-        this.fields = fields;
-    }
-    tag;
-    fields;
-    cases() {
-        return ["SVStr", "SVInt", "SVFloat", "SVBool", "SVList", "SVDict"];
-    }
-}
-const emptySchema = empty({
-    Compare: (x, y) => (comparePrimitives(x, y) | 0),
-});
-const emptyRegistry = empty({
-    Compare: (x, y) => (comparePrimitives(x, y) | 0),
-});
-function tryGetCodecEntry(fullName, registry) {
-    return tryFind(fullName, registry);
-}
-function isOptionType(fullName) {
-    return fullName.startsWith("Microsoft.FSharp.Core.FSharpOption");
-}
-function isFSharpListType(fullName) {
-    return fullName.startsWith("Microsoft.FSharp.Collections.FSharpList");
-}
-function getGenericInnerType(t) {
-    return item(0, getGenerics(t));
-}
-/**
- * Lazily wrap a backend-native value as a `JsonValue` for hand-off to
- * user codecs (`IJsonCodec.Decode`). Internal `coerce` never calls this
- * — it routes through `IJsonBackend.IsX` / `AsX` directly. On Fable
- * backends each `JString s` etc. is identity (no allocation thanks to
- * `[<Erase>]` legacy / Fable's representation of struct DUs); on the
- * .NET shim each call allocates a small DU instance.
- */
-function toJsonValue(backend, fv) {
-    if (backend.IsString(fv)) {
-        return JsonValue_JString(backend.AsString(fv));
-    }
-    else if (backend.IsInt(fv)) {
-        return JsonValue_JInt(backend.AsInt(fv));
-    }
-    else if (backend.IsFloat(fv)) {
-        return JsonValue_JFloat(backend.AsFloat(fv));
-    }
-    else if (backend.IsBool(fv)) {
-        return JsonValue_JBool(backend.AsBool(fv));
-    }
-    else if (backend.IsNull(fv)) {
-        return JsonValue.JNull;
-    }
-    else if (backend.IsArray(fv)) {
-        return JsonValue_JArray(fv);
-    }
-    else if (backend.IsMap(fv)) {
-        return JsonValue_JMap(fv);
-    }
-    else {
-        return toFail(printf("toJsonValue: unrecognised value of type %s"))("System.Object");
-    }
-}
-/**
- * Unwrap a `JsonValue` handed back by a user codec's `Encode` into the
- * backend-native form the encode path builds maps out of. The inverse of
- * `toJsonValue`, and the encode-side counterpart to `CodecEntry.decode`.
- *
- * `JArray` / `JMap` payloads are already backend-native (that is what
- * `toJsonValue` put in them), so they pass straight through.
- */
-function fromJsonValue(backend, jv) {
-    switch (jv.tag) {
-        case /* JInt */ 1:
-            return jv.fields[0];
-        case /* JFloat */ 2:
-            return jv.fields[0];
-        case /* JBool */ 3:
-            return jv.fields[0];
-        case /* JNull */ 4:
-            return backend.Null;
-        case /* JArray */ 5:
-            return jv.fields[0];
-        case /* JMap */ 6:
-            return jv.fields[0];
-        default:
-            return jv.fields[0];
-    }
-}
-/**
- * Render a backend-native value as a short human-readable string for
- * error messages — replaces the JsonValue pattern match the old
- * coerce-error path used.
- */
-function describeValue(backend, fv) {
-    if (backend.IsString(fv)) {
-        const arg = backend.AsString(fv);
-        return toText(printf("string \'%s\'"))(arg);
-    }
-    else if (backend.IsInt(fv)) {
-        const arg_1 = backend.AsInt(fv) | 0;
-        return toText(printf("int %d"))(arg_1);
-    }
-    else if (backend.IsFloat(fv)) {
-        const arg_2 = backend.AsFloat(fv);
-        return toText(printf("float %f"))(arg_2);
-    }
-    else if (backend.IsBool(fv)) {
-        const arg_3 = backend.AsBool(fv);
-        return toText(printf("bool %b"))(arg_3);
-    }
-    else if (backend.IsNull(fv)) {
-        return "null";
-    }
-    else if (backend.IsArray(fv)) {
-        return "array";
-    }
-    else if (backend.IsMap(fv)) {
-        return "map";
-    }
-    else {
-        return "<unknown>";
-    }
-}
-/**
- * Build a `key -> obj option` lookup over a backend-native JSON map.
- * One implementation backing both the internal record/union resolvers and
- * the public adapters — declared ahead of the walker
- * so the recursive group can reference it.
- */
-function mapLookup(backend, m, key) {
-    if (backend.ContainsKey(m, key)) {
-        return some(backend.Get(m, key));
-    }
-    else {
-        return undefined;
-    }
-}
-/**
- * Adapt a Map<string, string> (e.g., ToolCall.input from LLM). Each value
- * is the raw F# string — `coerce` recognises it via `backend.IsString`
- * and dispatches into the string-target arm of the giant primitive
- * pattern (which can also coerce to int / float / bool).
- */
-function stringMapAdapter(map, key) {
-    const matchValue = tryFind(key, map);
-    if (matchValue == null) {
-        return undefined;
-    }
-    else {
-        return some(value(matchValue));
-    }
-}
-class LookupSource extends Record {
-    Get;
-    AsMap;
-    constructor(Get, AsMap) {
-        super();
-        this.Get = Get;
-        this.AsMap = AsMap;
-    }
-}
-/**
- * `stringMapAdapter` plus the whole-map face. Values stay raw F# strings —
- * the same shape `Get` hands out, and what every backend's `IsString` /
- * `AsString` pair already accepts.
- */
-function stringMapSource(backend, map) {
-    return new LookupSource((key) => stringMapAdapter(map, key), () => fold((acc, key_1, value) => backend.Put(acc, key_1, value), backend.NewMap(), map));
-}
-
-function validResponse(regexMatch, radix) {
-    const [/*all*/ , sign, prefix, digits] = regexMatch;
-    return {
-        sign: sign || "",
-        prefix: prefix || "",
-        digits,
-        radix,
-    };
-}
-function getRange$1(unsigned, bitsize) {
-    switch (bitsize) {
-        case 8: return unsigned ? [0, 255] : [-128, 127];
-        case 16: return unsigned ? [0, 65535] : [-32768, 32767];
-        case 32: return unsigned ? [0, 4294967295] : [-2147483648, 2147483647];
-        default: throw new Exception("Invalid bit size.");
-    }
-}
-function getInvalidDigits(radix) {
-    switch (radix) {
-        case 2: return /[^0-1]/;
-        case 8: return /[^0-7]/;
-        case 10: return /[^0-9]/;
-        case 16: return /[^0-9a-fA-F]/;
-        default:
-            throw new Exception("Invalid Base.");
-    }
-}
-function getPrefix(radix) {
-    switch (radix) {
-        case 2: return "0b";
-        case 8: return "0o";
-        case 10: return "";
-        case 16: return "0x";
-        default: return "";
-    }
-}
-function getRadix(prefix, style) {
-    {
-        switch (prefix) {
-            case "0b":
-            case "0B": return 2;
-            case "0o":
-            case "0O": return 8;
-            case "0x":
-            case "0X": return 16;
-            default: return 10;
-        }
-    }
-}
-function isValid(str, style, radix) {
-    const integerRegex = /^\s*([\+\-])?(0[xXoObB])?([0-9a-fA-F]+)\s*$/;
-    const res = integerRegex.exec(str.replace(/_/g, ""));
-    if (res != null) {
-        const [/*all*/ , /*sign*/ , prefix, digits] = res;
-        radix = radix || getRadix(prefix);
-        const invalidDigits = getInvalidDigits(radix);
-        if (!invalidDigits.test(digits)) {
-            return validResponse(res, radix);
-        }
-    }
-    return null;
-}
-function parse$2(str, style, unsigned, bitsize, radix) {
-    const res = isValid(str, style, radix);
-    if (res != null) {
-        let v = Number.parseInt(res.sign + res.digits, res.radix);
-        if (!Number.isNaN(v)) {
-            const [umin, umax] = getRange$1(true, bitsize);
-            if (res.radix !== 10 && v >= umin && v <= umax) {
-                v = v << (32 - bitsize) >> (32 - bitsize);
-            }
-            const [min, max] = getRange$1(unsigned, bitsize);
-            if (v >= min && v <= max) {
-                return v;
-            }
-        }
-    }
-    throw new Exception(`The input string ${str} was not in a correct format.`);
-}
-function tryParse$1(str, style, unsigned, bitsize, defValue) {
-    try {
-        defValue.contents = parse$2(str, style, unsigned, bitsize);
-        return true;
-    }
-    catch {
-        return false;
-    }
-}
-function op_UnaryNegation_Int32(x) {
-    return x === -2147483648 ? x : -x;
-}
-
-function getRange(unsigned, bitsize) {
-    switch (bitsize) {
-        case 64: return unsigned ?
-            [0n, 18446744073709551615n] :
-            [-9223372036854775808n, 9223372036854775807n];
-        default: throw new Exception("Invalid bit size.");
-    }
-}
-function parse$1(str, style, unsigned, bitsize, radix) {
-    const res = isValid(str, style, radix);
-    if (res != null) {
-        let v = fromString(getPrefix(res.radix) + res.digits);
-        if (res.sign === "-") {
-            v = -v;
-        }
-        const [umin, umax] = getRange(true, bitsize);
-        if (res.radix !== 10 && v >= umin && v <= umax) {
-            v = BigInt.asIntN(bitsize, v);
-        }
-        const [min, max] = getRange(unsigned, bitsize);
-        if (v >= min && v <= max) {
-            return v;
-        }
-    }
-    throw new Exception(`The input string ${str} was not in a correct format.`);
-}
-function tryParse(str, style, unsigned, bitsize, defValue) {
-    try {
-        defValue.contents = parse$1(str, style, unsigned, bitsize);
-        return true;
-    }
-    catch {
-        return false;
-    }
-}
-
-/**
- * DateTimeOffset functions.
- *
- * Note: DateOffset instances are always DateObjects in local
- * timezone (because JS dates are all kinds of messed up).
- * A local date returns UTC epoch when `.getTime()` is called.
- *
- * However, this means that in order to construct an UTC date
- * from a DateOffset with offset of +5 hours, you first need
- * to subtract those 5 hours, than add the "local" offset.
- * As said, all kinds of messed up.
- *
- * Basically; invariant: date.getTime() always return UTC time.
- */
-function DateTimeOffset(value, offset) {
-    checkOffsetInRange(offset);
-    const d = new Date(value);
-    d.offset = offset != null ? offset : new Date().getTimezoneOffset() * -6e4;
-    return d;
-}
-function checkOffsetInRange(offset) {
-    if (offset != null && offset !== 0) {
-        if (offset % 60_000 !== 0) {
-            throw new Exception("Offset must be specified in whole minutes.");
-        }
-        if (Math.abs(offset / 3600000) > 14) {
-            throw new Exception("Offset must be within plus or minus 14 hours.");
-        }
-    }
-}
-function fromDate(date, offset) {
-    let offset2 = 0;
-    switch (date.kind) {
-        case DateTimeKind.Utc:
-            offset2 = 0;
-            break;
-        case DateTimeKind.Local:
-            offset2 = date.getTimezoneOffset() * -6e4;
-            if (offset !== offset2) {
-                throw new Exception("The UTC Offset of the local dateTime parameter does not match the offset argument.");
-            }
-            break;
-        case DateTimeKind.Unspecified:
-        default:
-            {
-                offset2 = offset;
-            }
-            break;
-    }
-    return DateTimeOffset(date.getTime(), offset2);
-}
-function toUniversalTime(date) {
-    return DateTime(date.getTime(), DateTimeKind.Utc);
-}
-
-// RFC 4122 compliant. From https://stackoverflow.com/a/13653180/3922220
-// const guidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-// Relax GUID parsing, see #1637
-const guidRegex = /^[\(\{]{0,2}[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[\)\}]{0,2}$/;
-const guidRegexNoHyphen = /^([0-9a-f]{8})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{12})$/;
-const guidRegexHex = /^\{0x[0-9a-f]{8},(0x[0-9a-f]{4},){2}\{(0x[0-9a-f]{2},){7}0x[0-9a-f]{2}\}\}$/;
-/** Validates UUID as specified in RFC4122 (versions 1-5). */
-function parse(str) {
-    function hyphenateGuid(str) {
-        return str.replace(guidRegexNoHyphen, "$1-$2-$3-$4-$5");
-    }
-    const wsTrimAndLowered = str.trim().toLowerCase();
-    if (guidRegex.test(wsTrimAndLowered)) {
-        return trim(wsTrimAndLowered, "{", "}", "(", ")");
-    }
-    else if (guidRegexNoHyphen.test(wsTrimAndLowered)) {
-        return hyphenateGuid(wsTrimAndLowered);
-    }
-    else if (guidRegexHex.test(wsTrimAndLowered)) {
-        return hyphenateGuid(wsTrimAndLowered.replace(/[\{\},]|0x/g, ''));
-    }
-    else {
-        throw new Exception("Guid should contain 32 digits with 4 dashes: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx");
-    }
-}
-
-/**
- * Cross-type coercion is intentional and load-bearing: LLM tool calls deliver
- * every argument as a string, so `"42"` must reach an `int` field.
- */
-function parseInt$(s) {
-    let matchValue;
-    let outArg = 0;
-    matchValue = [tryParse$1(s, 511, false, 32, new FSharpRef(() => (outArg | 0), (v) => {
-            outArg = (v | 0);
-        })), outArg];
-    if (matchValue[0]) {
-        return FSharpResult$2_Ok(matchValue[1]);
-    }
-    else {
-        return FSharpResult$2_Error$(toText(printf("cannot parse \'%s\' as int"))(s));
-    }
-}
-function parseInt64(s) {
-    let matchValue;
-    let outArg = 0n;
-    matchValue = [tryParse(s, 511, false, 64, new FSharpRef(() => outArg, (v) => {
-            outArg = v;
-        })), outArg];
-    if (matchValue[0]) {
-        return FSharpResult$2_Ok(matchValue[1]);
-    }
-    else {
-        return FSharpResult$2_Error$(toText(printf("cannot parse \'%s\' as int64"))(s));
-    }
-}
-function parseFloat$(s) {
-    let matchValue;
-    let outArg = 0;
-    matchValue = [tryParse$2(s, new FSharpRef(() => outArg, (v) => {
-            outArg = v;
-        })), outArg];
-    if (matchValue[0]) {
-        return FSharpResult$2_Ok(matchValue[1]);
-    }
-    else {
-        return FSharpResult$2_Error$(toText(printf("cannot parse \'%s\' as float"))(s));
-    }
-}
-/**
- * Accepts only the two JSON literals, case-insensitively. Deliberately not
- * `"1"` / `"yes"` / `""` — a silent truthiness rule is the wrong default for
- * validating tool input.
- */
-function parseBool(s) {
-    const matchValue = s.toLocaleLowerCase();
-    switch (matchValue) {
-        case "true":
-            return FSharpResult$2_Ok(true);
-        case "false":
-            return FSharpResult$2_Ok(false);
-        default:
-            return FSharpResult$2_Error$(toText(printf("cannot parse \'%s\' as bool"))(s));
-    }
-}
-function splitZoneOffset(s) {
-    if (s.length <= 10) {
-        return undefined;
-    }
-    else {
-        const tail = substring(s, 10);
-        const plus = tail.indexOf("+") | 0;
-        const minus = tail.indexOf("-") | 0;
-        const signIndex = (((plus >= 0) && (minus >= 0)) ? min(plus, minus) : ((plus >= 0) ? plus : minus)) | 0;
-        if (signIndex < 0) {
-            return undefined;
-        }
-        else {
-            const offset = substring(tail, signIndex);
-            const digits = replace(substring(offset, 1), ":", "");
-            if (digits.length < 2) {
-                return undefined;
-            }
-            else {
-                const hours = parse$2(substring(digits, 0, 2), 511, false, 32) | 0;
-                const minutes = ((digits.length >= 4) ? parse$2(substring(digits, 2, 2), 511, false, 32) : 0) | 0;
-                const sign = ((offset[0] === "-") ? -1 : 1) | 0;
-                return [substring(s, 0, 10 + signIndex), sign * ((hours * 60) + minutes)];
-            }
-        }
-    }
-}
-function parseAsUtc(s) {
-    let matchValue;
-    let outArg = minValue();
-    matchValue = [tryParse$3(s, new FSharpRef(() => outArg, (v) => {
-            outArg = v;
-        })), outArg];
-    if (matchValue[0]) {
-        return FSharpResult$2_Ok(specifyKind(matchValue[1], 1));
-    }
-    else {
-        return FSharpResult$2_Error$(toText(printf("cannot parse \'%s\' as DateTime"))(s));
-    }
-}
-function parseDateTime(s) {
-    const matchValue = splitZoneOffset(s);
-    if (matchValue == null) {
-        return Result_MapError((_arg) => toText(printf("cannot parse \'%s\' as DateTime"))(s), parseAsUtc((s.endsWith("Z") ? true : s.endsWith("z")) ? substring(s, 0, s.length - 1) : s));
-    }
-    else {
-        const offsetMinutes = value(matchValue)[1] | 0;
-        return Result_Map((d) => addMinutes(d, op_UnaryNegation_Int32(offsetMinutes)), parseAsUtc(value(matchValue)[0]));
-    }
-}
-/**
- * A `DateTimeOffset` carries its own offset, so nothing has to be assumed about
- * a bare timestamp — the reason to prefer it over `DateTime` on a wire format.
- * Built from the UTC instant above rather than `DateTimeOffset.TryParse`, which
- * is not implemented consistently across the Fable backends.
- */
-function parseDateTimeOffset(s) {
-    return Result_MapError((_arg) => toText(printf("cannot parse \'%s\' as DateTimeOffset"))(s), Result_Map((utc) => fromDate(utc, 0), parseDateTime(s)));
-}
-/**
- * `Guid.Parse` guarded, not `TryParse`: the latter's `byref` overload is not
- * uniformly available across the Fable backends, and a guarded `Parse` is.
- */
-function parseGuid(s) {
-    try {
-        return FSharpResult$2_Ok(parse(s));
-    }
-    catch (matchValue) {
-        return FSharpResult$2_Error$(toText(printf("cannot parse \'%s\' as Guid"))(s));
-    }
-}
-function parseDecimal(s) {
-    let matchValue;
-    let outArg = new Big("0");
-    matchValue = [tryParse$4(s, new FSharpRef(() => outArg, (v) => {
-            outArg = v;
-        })), outArg];
-    if (matchValue[0]) {
-        return FSharpResult$2_Ok(matchValue[1]);
-    }
-    else {
-        return FSharpResult$2_Error$(toText(printf("cannot parse \'%s\' as decimal"))(s));
-    }
-}
-function intToString(n) {
-    return int32ToString(n);
-}
-function floatToString(f) {
-    return f.toString();
-}
-/**
- * The JSON literals, not .NET's `"True"` / `"False"`.
- */
-function boolToString(b) {
-    if (b) {
-        return "true";
-    }
-    else {
-        return "false";
-    }
-}
-function dateTimeToString(d) {
-    return toString(toUniversalTime$1(d), "yyyy-MM-ddTHH:mm:ss.fffffff") + "Z";
-}
-/**
- * Rendered in UTC with the `Z` designator, exactly like `dateTimeToString` —
- * the offset is preserved as an instant rather than as a local wall clock.
- */
-function dateTimeOffsetToString(d) {
-    return toString(toUniversalTime(d), "yyyy-MM-ddTHH:mm:ss.fffffff") + "Z";
-}
-/**
- * Canonical 8-4-4-4-12, lower case — what `format: uuid` denotes.
- */
-function guidToString(g) {
-    return g;
-}
-function decimalToString(d) {
-    return toString$1(d);
-}
-
-class Plan extends Record {
-    Decode;
-    Encode;
-    Schema;
-    Definitions;
-    constructor(Decode, Encode, Schema, Definitions) {
-        super();
-        this.Decode = Decode;
-        this.Encode = Encode;
-        this.Schema = Schema;
-        this.Definitions = Definitions;
-    }
-}
-class FieldPlan extends Record {
-    Key;
-    Optional;
-    TypeName;
-    Inner;
-    Wrap;
-    Read;
-    constructor(Key, Optional, TypeName, Inner, Wrap, Read) {
-        super();
-        this.Key = Key;
-        this.Optional = Optional;
-        this.TypeName = TypeName;
-        this.Inner = Inner;
-        this.Wrap = Wrap;
-        this.Read = Read;
-    }
-}
-class RecordPlan extends Record {
-    Fields;
-    Make;
-    Title;
-    constructor(Fields, Make, Title) {
-        super();
-        this.Fields = Fields;
-        this.Make = Make;
-        this.Title = Title;
-    }
-}
-class CasePlan extends Record {
-    Tag;
-    Info;
-    Payload;
-    constructor(Tag, Info, Payload) {
-        super();
-        this.Tag = Tag;
-        this.Info = Info;
-        this.Payload = Payload;
-    }
-}
-class BuildCtx extends Record {
-    Backend;
-    Registry;
-    KeyTransform;
-    TagTransform;
-    Building;
-    RefMode;
-    constructor(Backend, Registry, KeyTransform, TagTransform, Building, RefMode) {
-        super();
-        this.Backend = Backend;
-        this.Registry = Registry;
-        this.KeyTransform = KeyTransform;
-        this.TagTransform = TagTransform;
-        this.Building = Building;
-        this.RefMode = RefMode;
-    }
-}
-function joinPath(parent, child) {
-    if (child === "") {
-        return parent;
-    }
-    else if (parent === "") {
-        return child;
-    }
-    else if (child.startsWith("[")) {
-        return parent + child;
-    }
-    else {
-        return (parent + ".") + child;
-    }
-}
-function under(path, errs) {
-    return map((e) => (new FieldError(joinPath(path, e.path), e.message)), errs);
-}
-function leafError(message) {
-    return FSharpResult$2_Error$(singleton(new FieldError("", message)));
-}
-function primitiveNode(typeName) {
-    return JsonSchemaValue_SVDict(ofList(singleton(["type", JsonSchemaValue_SVStr(typeName)]), {
-        Compare: (x, y) => (comparePrimitives(x, y) | 0),
-    }));
-}
-function formatNode(typeName, format) {
-    return JsonSchemaValue_SVDict(ofList(ofArray$1([["type", JsonSchemaValue_SVStr(typeName)], ["format", JsonSchemaValue_SVStr(format)]]), {
-        Compare: (x, y) => (comparePrimitives(x, y) | 0),
-    }));
-}
-const noDefs = empty({
-    Compare: (x, y) => (comparePrimitives(x, y) | 0),
-});
-function mergeDefs(maps) {
-    return fold$1((acc, m) => fold((a, k, v) => add(k, v, a), acc, m), empty({
-        Compare: (x, y) => (comparePrimitives(x, y) | 0),
-    }), maps);
-}
-function refOrInline(ctx, key, body, childDefs) {
-    const matchValue = ctx.RefMode;
-    if (matchValue == null) {
-        return [body, childDefs];
-    }
-    else {
-        return [JsonSchemaValue_SVDict(ofList(singleton(["$ref", JsonSchemaValue_SVStr(value(matchValue) + key)]), {
-                Compare: (x, y) => (comparePrimitives(x, y) | 0),
-            })), add(key, body, childDefs)];
-    }
-}
-const discriminatorKey = "type";
-function forTypeIn(ctx, t) {
-    const fullName$1 = fullName(t);
-    const b = ctx.Backend;
-    switch (fullName$1) {
-        case "System.String":
-            return planString(b);
-        case "System.Int32":
-            return planInt(b);
-        case "System.Int64":
-            return planInt64(b);
-        case "System.Double":
-            return planFloat(b);
-        case "System.Boolean":
-            return planBool(b);
-        default: {
-            const matchValue = tryGetCodecEntry(fullName$1, ctx.Registry);
-            if (matchValue == null) {
-                switch (fullName$1) {
-                    case "System.DateTime":
-                        return planDateTime(b);
-                    case "System.DateTimeOffset":
-                        return planDateTimeOffset(b);
-                    case "System.Guid":
-                        return planGuid(b);
-                    case "System.Decimal":
-                        return planDecimal(b);
-                    default:
-                        if (isFSharpListType(fullName$1)) {
-                            return planSeq(ctx, getGenericInnerType(t), (v_2) => v_2, (_elementType, xs) => xs);
-                        }
-                        else if (isArray(t)) {
-                            return planSeq(ctx, getElementType(t), ofArray$1, (_elementType_2, xs_2) => toArray(xs_2));
-                        }
-                        else if (isRecord(t)) {
-                            if (contains(fullName$1, ctx.Building, {
-                                Equals: (x_1, y) => (x_1 === y),
-                                GetHashCode: (x_1) => (stringHash(x_1) | 0),
-                            })) {
-                                return planDeferred(ctx, t);
-                            }
-                            else {
-                                return planRecord(ctx, t);
-                            }
-                        }
-                        else if (isUnion(t)) {
-                            if (contains(fullName$1, ctx.Building, {
-                                Equals: (x_2, y_1) => (x_2 === y_1),
-                                GetHashCode: (x_2) => (stringHash(x_2) | 0),
-                            })) {
-                                return planDeferred(ctx, t);
-                            }
-                            else {
-                                return planUnion(ctx, t);
-                            }
-                        }
-                        else {
-                            const message = toText(printf("cannot decode %s"))(fullName$1);
-                            return new Plan((_arg) => leafError(message), (x_3) => x_3, JsonSchemaValue_SVDict(emptySchema), noDefs);
-                        }
-                }
-            }
-            else {
-                const entry = value(matchValue);
-                return new Plan((v) => {
-                    const matchValue_1 = entry.decode(toJsonValue(b, v));
-                    return (matchValue_1.tag === /* Error */ 1) ? leafError(matchValue_1.fields[0]) : FSharpResult$2_Ok(matchValue_1.fields[0]);
-                }, (v_1) => fromJsonValue(b, entry.encode(v_1)), JsonSchemaValue_SVDict(entry.schema), noDefs);
-            }
-        }
-    }
-}
-function planString(b) {
-    return new Plan((v) => {
-        let arg = undefined;
-        return b.IsString(v) ? FSharpResult$2_Ok(b.AsString(v)) : (b.IsInt(v) ? FSharpResult$2_Ok(intToString(b.AsInt(v))) : (b.IsFloat(v) ? FSharpResult$2_Ok(floatToString(b.AsFloat(v))) : (b.IsBool(v) ? FSharpResult$2_Ok(boolToString(b.AsBool(v))) : leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.String"))(arg))))));
-    }, (x) => x, primitiveNode("string"), noDefs);
-}
-function planInt(b) {
-    return new Plan((v) => {
-        let arg = undefined;
-        if (b.IsInt(v)) {
-            return FSharpResult$2_Ok(b.AsInt(v));
-        }
-        else if (b.IsFloat(v)) {
-            return FSharpResult$2_Ok(~~b.AsFloat(v));
-        }
-        else if (b.IsString(v)) {
-            const matchValue = parseInt$(b.AsString(v));
-            return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
-        }
-        else {
-            return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Int32"))(arg)));
-        }
-    }, (x) => x, primitiveNode("integer"), noDefs);
-}
-function planInt64(b) {
-    return new Plan((v) => {
-        let arg = undefined;
-        if (b.IsInt(v)) {
-            return FSharpResult$2_Ok(toInt64_unchecked(fromInt32(b.AsInt(v))));
-        }
-        else if (b.IsFloat(v)) {
-            return FSharpResult$2_Ok(toInt64_unchecked(fromFloat64(b.AsFloat(v))));
-        }
-        else if (b.IsString(v)) {
-            const matchValue = parseInt64(b.AsString(v));
-            return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
-        }
-        else {
-            return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Int64"))(arg)));
-        }
-    }, (x) => x, primitiveNode("integer"), noDefs);
-}
-function planFloat(b) {
-    return new Plan((v) => {
-        let arg = undefined;
-        if (b.IsFloat(v)) {
-            return FSharpResult$2_Ok(b.AsFloat(v));
-        }
-        else if (b.IsInt(v)) {
-            return FSharpResult$2_Ok(b.AsInt(v));
-        }
-        else if (b.IsString(v)) {
-            const matchValue = parseFloat$(b.AsString(v));
-            return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
-        }
-        else {
-            return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Double"))(arg)));
-        }
-    }, (x) => x, primitiveNode("number"), noDefs);
-}
-function planBool(b) {
-    return new Plan((v) => {
-        let arg = undefined;
-        if (b.IsBool(v)) {
-            return FSharpResult$2_Ok(b.AsBool(v));
-        }
-        else if (b.IsString(v)) {
-            const matchValue = parseBool(b.AsString(v));
-            return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
-        }
-        else {
-            return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Boolean"))(arg)));
-        }
-    }, (x_1) => x_1, primitiveNode("boolean"), noDefs);
-}
-function planDateTime(b) {
-    return new Plan((v) => {
-        let arg = undefined;
-        if (b.IsString(v)) {
-            const matchValue = parseDateTime(b.AsString(v));
-            return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
-        }
-        else {
-            return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.DateTime"))(arg)));
-        }
-    }, dateTimeToString, formatNode("string", "date-time"), noDefs);
-}
-function planDateTimeOffset(b) {
-    return new Plan((v) => {
-        let arg = undefined;
-        if (b.IsString(v)) {
-            const matchValue = parseDateTimeOffset(b.AsString(v));
-            return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
-        }
-        else {
-            return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.DateTimeOffset"))(arg)));
-        }
-    }, dateTimeOffsetToString, formatNode("string", "date-time"), noDefs);
-}
-function planGuid(b) {
-    return new Plan((v) => {
-        let arg = undefined;
-        if (b.IsString(v)) {
-            const matchValue = parseGuid(b.AsString(v));
-            return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
-        }
-        else {
-            return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Guid"))(arg)));
-        }
-    }, guidToString, formatNode("string", "uuid"), noDefs);
-}
-function planDecimal(b) {
-    return new Plan((v) => {
-        let arg = undefined;
-        if (b.IsString(v)) {
-            const matchValue = parseDecimal(b.AsString(v));
-            return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
-        }
-        else {
-            return b.IsInt(v) ? FSharpResult$2_Ok(new Big(b.AsInt(v))) : (b.IsFloat(v) ? FSharpResult$2_Ok(new Big(b.AsFloat(v))) : leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Decimal"))(arg))));
-        }
-    }, decimalToString, formatNode("string", "decimal"), noDefs);
-}
-function planSeq(ctx, elementType, extract, builder) {
-    const b = ctx.Backend;
-    const element = forTypeIn(ctx, elementType);
-    const build = curry2(builder)(elementType);
-    let expected;
-    const arg = name(elementType);
-    expected = toText(printf("expected JSON array for %s[]"))(arg);
-    return new Plan((v_1) => {
-        if (!b.IsArray(v_1)) {
-            return leafError(expected);
-        }
-        else {
-            const len = b.ArrayLength(v_1) | 0;
-            let i = 0;
-            let failure = undefined;
-            let acc = empty$1();
-            while ((i < len) && (failure == null)) {
-                let arg_1 = undefined;
-                const matchValue = element.Decode(b.ArrayAt(v_1, i));
-                if (matchValue.tag === /* Error */ 1) {
-                    const errs = matchValue.fields[0];
-                    failure = under((arg_1 = (i | 0), toText(printf("[%d]"))(arg_1)), errs);
-                }
-                else {
-                    const x_1 = matchValue.fields[0];
-                    acc = cons(x_1, acc);
-                }
-                i = ((i + 1) | 0);
-            }
-            return (failure == null) ? FSharpResult$2_Ok(build(reverse(acc))) : FSharpResult$2_Error$(value(failure));
-        }
-    }, (v) => {
-        const items = map(element.Encode, extract(v));
-        return b.BuildArray(items);
-    }, JsonSchemaValue_SVDict(ofList(ofArray$1([["type", JsonSchemaValue_SVStr("array")], ["items", element.Schema]]), {
-        Compare: (x, y) => (comparePrimitives(x, y) | 0),
-    })), element.Definitions);
-}
-function buildRecordPlan(ctx, t) {
-    const inner = new BuildCtx(ctx.Backend, ctx.Registry, ctx.KeyTransform, ctx.TagTransform, cons(fullName(t), ctx.Building), ctx.RefMode);
-    return new RecordPlan(map$2((fi) => {
-        const isOpt = isOptionType(fullName(fi[1]));
-        const innerType = isOpt ? getGenericInnerType(fi[1]) : fi[1];
-        return new FieldPlan(ctx.KeyTransform(name(fi)), isOpt, name(innerType), forTypeIn(inner, innerType), isOpt ? (some) : ((x) => x), (record) => getRecordField(record, fi));
-    }, getRecordElements(t)), (values) => makeRecord(t, values), name(t));
-}
-/**
- * Stage 2 for a record. Every key, option test and type name was resolved at
- * construction; this indexes arrays and calls closures.
- *
- * invariant: all fields are attempted and errors accumulate — not fail-fast
- */
-function decodeRecordWith(b, rp, lookup) {
-    const n = rp.Fields.length | 0;
-    const values = fill(new Array(n), 0, n, null);
-    let errs = empty$1();
-    for (let i = 0; i <= (n - 1); i++) {
-        let raw = undefined;
-        const f = item(i, rp.Fields);
-        const matchValue = lookup(f.Key);
-        if (matchValue != null) {
-            if ((raw = value(matchValue), b.IsNull(raw))) {
-                value(matchValue);
-                if (f.Optional) {
-                    setItem(values, i, undefined);
-                }
-                else {
-                    errs = cons(new FieldError(f.Key, toText(printf("null where %s was required"))(f.TypeName)), errs);
-                }
-            }
-            else {
-                const raw_2 = value(matchValue);
-                const matchValue_1 = f.Inner.Decode(raw_2);
-                if (matchValue_1.tag === /* Error */ 1) {
-                    const es = matchValue_1.fields[0];
-                    errs = append(reverse(under(f.Key, es)), errs);
-                }
-                else {
-                    const x = matchValue_1.fields[0];
-                    setItem(values, i, f.Wrap(x));
-                }
-            }
-        }
-        else if (f.Optional) {
-            setItem(values, i, undefined);
-        }
-        else {
-            errs = cons(new FieldError(f.Key, toText(printf("missing field (expected %s)"))(f.TypeName)), errs);
-        }
-    }
-    if (isEmpty(errs)) {
-        return FSharpResult$2_Ok(rp.Make(values));
-    }
-    else {
-        return FSharpResult$2_Error$(reverse(errs));
-    }
-}
-/**
- * Stage 2, encode side. Mirror of `decodeRecordWith`: same field array, same
- * keys, so the two cannot disagree about what a record looks like on the wire.
- *
- * adr: an absent optional field emits no key at all, rather than an explicit null
- */
-function encodeRecordInto(b, rp, acc0, record) {
-    let acc = acc0;
-    for (let i = 0; i <= (rp.Fields.length - 1); i++) {
-        const f = item(i, rp.Fields);
-        const v = f.Read(record);
-        if (f.Optional) {
-            const matchValue = v;
-            if (matchValue == null) ;
-            else {
-                const inner = value(matchValue);
-                acc = b.Put(acc, f.Key, f.Inner.Encode(inner));
-            }
-        }
-        else {
-            acc = b.Put(acc, f.Key, f.Inner.Encode(v));
-        }
-    }
-    return acc;
-}
-/**
- * The object schema for a record plan. `properties` reads the same `Key` the
- * decoder looks up and the encoder writes, so a case rule or alias cannot
- * apply to two of the three and not the third.
- *
- * An optional field contributes its inner type's schema and is simply absent
- * from `required` — JSON Schema has no separate notion of optionality.
- */
-function recordSchema(rp) {
-    const properties = ofArray$1(map$2((f) => [f.Key, f.Inner.Schema], rp.Fields));
-    const required = ofArray$1(choose((f_1) => {
-        if (f_1.Optional) {
-            return undefined;
-        }
-        else {
-            return JsonSchemaValue_SVStr(f_1.Key);
-        }
-    }, rp.Fields));
-    const baseSchema = ofList(ofArray$1([["type", JsonSchemaValue_SVStr("object")], ["title", JsonSchemaValue_SVStr(rp.Title)], ["properties", JsonSchemaValue_SVDict(ofList(properties, {
-                Compare: (x, y) => (comparePrimitives(x, y) | 0),
-            }))]]), {
-        Compare: (x_1, y_1) => (comparePrimitives(x_1, y_1) | 0),
-    });
-    if (isEmpty(required)) {
-        return baseSchema;
-    }
-    else {
-        return add("required", JsonSchemaValue_SVList(required), baseSchema);
-    }
-}
-function planRecord(ctx, t) {
-    const b = ctx.Backend;
-    const rp = buildRecordPlan(ctx, t);
-    const expected = toText(printf("expected JSON object for %s"))(rp.Title);
-    const childDefs = mergeDefs(ofArray$1(map$2((f) => f.Inner.Definitions, rp.Fields)));
-    const patternInput = refOrInline(ctx, fullName(t), JsonSchemaValue_SVDict(recordSchema(rp)), childDefs);
-    return new Plan((v) => (b.IsMap(v) ? decodeRecordWith(b, rp, (key) => mapLookup(b, v, key)) : leafError(expected)), (v_1) => encodeRecordInto(b, rp, b.NewMap(), v_1), patternInput[0], patternInput[1]);
-}
-function buildCasePlans(ctx, t) {
-    const inner = new BuildCtx(ctx.Backend, ctx.Registry, ctx.KeyTransform, ctx.TagTransform, cons(fullName(t), ctx.Building), ctx.RefMode);
-    return map$2((caseInfo) => {
-        const caseFields = getUnionCaseFields(caseInfo);
-        let payload;
-        const matchValue = caseFields.length | 0;
-        switch (matchValue) {
-            case 0: {
-                payload = undefined;
-                break;
-            }
-            case 1: {
-                const payloadType = item(0, caseFields)[1];
-                if (isRecord(payloadType)) {
-                    payload = buildRecordPlan(inner, payloadType);
-                }
-                else {
-                    const arg = name(caseInfo);
-                    const arg_1 = name(payloadType);
-                    const arg_2 = name(t);
-                    payload = toFail(printf("union case %s has a non-record payload (%s); not supported in v1 — register an IJsonCodec for %s instead"))(arg)(arg_1)(arg_2);
-                }
-                break;
-            }
-            default: {
-                const arg_3 = name(caseInfo);
-                payload = toFail(printf("union case %s has %d positional fields; multi-field cases are not supported in v1"))(arg_3)(matchValue);
-            }
-        }
-        return new CasePlan(ctx.TagTransform(name(caseInfo)), caseInfo, payload);
-    }, getUnionCases(t));
-}
-/**
- * Decode-side view: wire tag -> case.
- */
-function casesByTag(cases) {
-    return ofArray(map$2((c) => [c.Tag, c], cases), {
-        Compare: (x, y) => (comparePrimitives(x, y) | 0),
-    });
-}
-function decodeUnionWith(b, cases, typeName, lookup) {
-    let tagValue = undefined;
-    const matchValue = lookup(discriminatorKey);
-    if (matchValue != null) {
-        if ((tagValue = value(matchValue), b.IsString(tagValue))) {
-            const tagValue_1 = value(matchValue);
-            const tag = b.AsString(tagValue_1);
-            const matchValue_1 = tryFind(tag, cases);
-            if (matchValue_1 != null) {
-                const c = value(matchValue_1);
-                const matchValue_2 = c.Payload;
-                if (matchValue_2 != null) {
-                    return Result_Map((payload) => makeUnion(c.Info, [payload]), decodeRecordWith(b, value(matchValue_2), lookup));
-                }
-                else {
-                    return FSharpResult$2_Ok(makeUnion(c.Info, []));
-                }
-            }
-            else {
-                return FSharpResult$2_Error$(singleton(new FieldError(discriminatorKey, toText(printf("no case in %s matches discriminator value \'%s\'"))(typeName)(tag))));
-            }
-        }
-        else {
-            return FSharpResult$2_Error$(singleton(new FieldError(discriminatorKey, toText(printf("discriminator \'%s\' must be a string"))(discriminatorKey))));
-        }
-    }
-    else {
-        return FSharpResult$2_Error$(singleton(new FieldError(discriminatorKey, toText(printf("missing discriminator \'%s\' for %s"))(discriminatorKey)(typeName))));
-    }
-}
-/**
- * Encode-side view: the value's runtime case tag indexes straight into the
- * same array decode was built from.
- *
- * `caseValues : obj[]` has a different runtime shape per backend — a
- * process-dict ref on BEAM, a GenericArray on Python, a native array on .NET —
- * so payload access goes through `ArrayLength` / `ArrayAt`.
- */
-function encodeUnionWith(b, byTag, t, v) {
-    const patternInput = getUnionFields(v, t);
-    const c = item(patternInput[0].tag, byTag);
-    const acc = b.Put(b.NewMap(), discriminatorKey, c.Tag);
-    const matchValue = c.Payload;
-    if (matchValue != null) {
-        return encodeRecordInto(b, value(matchValue), acc, b.ArrayAt(patternInput[1], 0));
-    }
-    else {
-        return acc;
-    }
-}
-function planUnion(ctx, t) {
-    const b = ctx.Backend;
-    const cases = buildCasePlans(ctx, t);
-    const byTag = casesByTag(cases);
-    const byIndex = sortBy((c) => (c.Info.tag | 0), cases, {
-        Compare: (x, y) => (comparePrimitives(x, y) | 0),
-    });
-    const typeName = name(t);
-    const expected = toText(printf("expected JSON object for %s"))(typeName);
-    const childDefs = mergeDefs(toList(delay(() => collect((c_2) => {
-        const matchValue_3 = c_2.Payload;
-        if (matchValue_3 == null) {
-            return empty$2();
-        }
-        else {
-            return ofArray$1(map$2((f) => f.Inner.Definitions, value(matchValue_3).Fields));
-        }
-    }, byIndex))));
-    const body = JsonSchemaValue_SVDict(ofList(ofArray$1([["title", JsonSchemaValue_SVStr(typeName)], ["oneOf", JsonSchemaValue_SVList(toList(delay(() => map$1((c_3) => {
-                const c_1 = c_3;
-                const discriminator = ofList(singleton([discriminatorKey, JsonSchemaValue_SVDict(ofList(singleton(["const", JsonSchemaValue_SVStr(c_1.Tag)]), {
-                        Compare: (x_1, y_1) => (comparePrimitives(x_1, y_1) | 0),
-                    }))]), {
-                    Compare: (x_2, y_2) => (comparePrimitives(x_2, y_2) | 0),
-                });
-                const matchValue = c_1.Payload;
-                if (matchValue != null) {
-                    const payload = recordSchema(value(matchValue));
-                    let properties;
-                    const matchValue_1 = tryFind("properties", payload);
-                    let matchResult = undefined, p = undefined;
-                    if (matchValue_1 != null) {
-                        if (value(matchValue_1).tag === /* SVDict */ 5) {
-                            matchResult = 0;
-                            p = value(matchValue_1).fields[0];
-                        }
-                        else {
-                            matchResult = 1;
-                        }
-                    }
-                    else {
-                        matchResult = 1;
-                    }
-                    switch (matchResult) {
-                        case 0: {
-                            properties = fold((acc, k, v) => add(k, v, acc), discriminator, p);
-                            break;
-                        }
-                        default:
-                            properties = discriminator;
-                    }
-                    let required;
-                    const matchValue_2 = tryFind("required", payload);
-                    let matchResult_1 = undefined, r = undefined;
-                    if (matchValue_2 != null) {
-                        if (value(matchValue_2).tag === /* SVList */ 4) {
-                            matchResult_1 = 0;
-                            r = value(matchValue_2).fields[0];
-                        }
-                        else {
-                            matchResult_1 = 1;
-                        }
-                    }
-                    else {
-                        matchResult_1 = 1;
-                    }
-                    switch (matchResult_1) {
-                        case 0: {
-                            required = cons(JsonSchemaValue_SVStr(discriminatorKey), r);
-                            break;
-                        }
-                        default:
-                            required = singleton(JsonSchemaValue_SVStr(discriminatorKey));
-                    }
-                    return JsonSchemaValue_SVDict(ofList(ofArray$1([["type", JsonSchemaValue_SVStr("object")], ["title", JsonSchemaValue_SVStr(name(c_1.Info))], ["properties", JsonSchemaValue_SVDict(properties)], ["required", JsonSchemaValue_SVList(required)]]), {
-                        Compare: (x_4, y_4) => (comparePrimitives(x_4, y_4) | 0),
-                    }));
-                }
-                else {
-                    return JsonSchemaValue_SVDict(ofList(ofArray$1([["type", JsonSchemaValue_SVStr("object")], ["title", JsonSchemaValue_SVStr(name(c_1.Info))], ["properties", JsonSchemaValue_SVDict(discriminator)], ["required", JsonSchemaValue_SVList(singleton(JsonSchemaValue_SVStr(discriminatorKey)))]]), {
-                        Compare: (x_3, y_3) => (comparePrimitives(x_3, y_3) | 0),
-                    }));
-                }
-            }, byIndex))))]]), {
-        Compare: (x_5, y_5) => (comparePrimitives(x_5, y_5) | 0),
-    }));
-    const patternInput = refOrInline(ctx, fullName(t), body, childDefs);
-    return new Plan((v_1) => (b.IsMap(v_1) ? decodeUnionWith(b, byTag, typeName, (key) => mapLookup(b, v_1, key)) : leafError(expected)), (v_2) => encodeUnionWith(b, byIndex, t, v_2), patternInput[0], patternInput[1]);
-}
-function planDeferred(ctx, t) {
-    let matchValue = undefined;
-    const restart = new BuildCtx(ctx.Backend, ctx.Registry, ctx.KeyTransform, ctx.TagTransform, empty$1(), ctx.RefMode);
-    return new Plan((v) => forTypeIn(restart, t).Decode(v), (v_1) => forTypeIn(restart, t).Encode(v_1), (matchValue = ctx.RefMode, (matchValue == null) ? JsonSchemaValue_SVDict(ofList(ofArray$1([["type", JsonSchemaValue_SVStr("object")], ["title", JsonSchemaValue_SVStr(name(t))]]), {
-        Compare: (x_1, y_1) => (comparePrimitives(x_1, y_1) | 0),
-    })) : JsonSchemaValue_SVDict(ofList(singleton(["$ref", JsonSchemaValue_SVStr(value(matchValue) + fullName(t))]), {
-        Compare: (x, y) => (comparePrimitives(x, y) | 0),
-    }))), noDefs);
-}
-function forType(backend, registry, keyTransform, tagTransform, t) {
-    return forTypeIn(new BuildCtx(backend, registry, keyTransform, tagTransform, empty$1(), undefined), t);
-}
-function forTypeFromLookup(backend, registry, keyTransform, tagTransform, t) {
-    const ctx = new BuildCtx(backend, registry, keyTransform, tagTransform, empty$1(), undefined);
-    const fullName$1 = fullName(t);
-    const keyless = () => {
-        let arg = undefined;
-        const err = singleton(new FieldError("", (arg = name(t), toText(printf("auto<%s> requires a record or discriminated-union type"))(arg))));
-        return (_arg) => FSharpResult$2_Error$(err);
-    };
-    if (isFSharpListType(fullName$1) ? true : isArray(t)) {
-        return keyless();
-    }
-    else if (isRecord(t) ? true : isUnion(t)) {
-        const matchValue = tryGetCodecEntry(fullName$1, registry);
-        if (matchValue == null) {
-            if (isRecord(t)) {
-                const rp = buildRecordPlan(ctx, t);
-                return (src_1) => decodeRecordWith(backend, rp, src_1.Get);
-            }
-            else {
-                const cases = casesByTag(buildCasePlans(ctx, t));
-                const typeName = name(t);
-                return (src_2) => decodeUnionWith(backend, cases, typeName, src_2.Get);
-            }
-        }
-        else {
-            const entry = value(matchValue);
-            return (src) => {
-                const matchValue_1 = entry.decode(toJsonValue(backend, src.AsMap()));
-                return (matchValue_1.tag === /* Error */ 1) ? leafError(matchValue_1.fields[0]) : FSharpResult$2_Ok(matchValue_1.fields[0]);
-            };
-        }
-    }
-    else {
-        return keyless();
-    }
-}
-
-function separateUpper(separator, name) {
-    let result = "";
-    for (let i = 0; i <= (name.length - 1); i++) {
-        const c = name[i];
-        if (isUpper(c)) {
-            if (i > 0) {
-                result = (result + separator);
-            }
-            result = (result + c.toLowerCase());
-        }
-        else {
-            result = (result + c);
-        }
-    }
-    return result;
-}
-function toSnakeCase(name) {
-    return separateUpper("_", name);
-}
-function dashify(separator, name) {
-    return separateUpper(separator, name);
-}
-/**
- * Apply a case rule to a field name.
- * Reflection reports the F# spelling (`AirTemperature`) on every target, but
- * the rule still normalizes to a canonical PascalCase form before emitting the
- * requested casing — so it produces the same output whether it is handed an F#
- * field name, a snake_case name, or a name already in the target casing.
- * BEAM reflection reported snake_case before Fable 5.8.1
- * (fable-compiler/Fable#4766); the normalization keeps that input working too.
- */
-function applyCaseRule(caseRule, name) {
-    if (caseRule === 0) {
-        return name;
-    }
-    else {
-        const pascal = toCanonicalPascal(name);
-        switch (caseRule) {
-            case 1:
-                return lowerFirst(pascal);
-            case 2:
-                return toSnakeCase(pascal);
-            case 3:
-                return toSnakeCase(pascal).toUpperCase();
-            case 4:
-                return dashify("-", pascal);
-            case 5:
-                return pascal;
-            default:
-                return pascal;
-        }
-    }
-}
-class TypedJson$1 extends Record {
-    decode;
-    encode;
-    decodeWith;
-    encodeWith;
-    decodeStringMap;
-    caseRules;
-    aliases;
-    withCaseRules;
-    withAliases;
-    constructor(decode, encode, decodeWith, encodeWith, decodeStringMap, caseRules, aliases, withCaseRules, withAliases) {
-        super();
-        this.decode = decode;
-        this.encode = encode;
-        this.decodeWith = decodeWith;
-        this.encodeWith = encodeWith;
-        this.decodeStringMap = decodeStringMap;
-        this.caseRules = caseRules;
-        this.aliases = aliases;
-        this.withCaseRules = withCaseRules;
-        this.withAliases = withAliases;
-    }
-}
-/**
- * Serialize a backend-native value (map, list, primitive) to a JSON string.
- */
-function Encode_toJson(backend, term) {
-    return backend.Stringify(term);
-}
-/**
- * Resolve the JSON key for a given F# field name: alias if present,
- * otherwise the case-rule-derived form. Lookup is keyed by the field's
- * PascalCase form so the same alias works regardless of how the
- * backend's reflection presents the name (BEAM lowercases, Python
- * preserves the F# spelling).
- */
-function resolveKey(aliases, caseRules, fieldName) {
-    const matchValue = tryFind(applyCaseRule(5, fieldName), aliases);
-    if (matchValue == null) {
-        return applyCaseRule(caseRules, fieldName);
-    }
-    else {
-        return value(matchValue);
-    }
-}
-function buildCodec(backend, registry, typ) {
-    const build = (aliases, caseRules) => {
-        const defaultKeyTransform = (fieldName) => resolveKey(aliases, caseRules, fieldName);
-        const defaultTagTransform = (name) => applyCaseRule(caseRules, name);
-        const defaultPlan = forType(backend, registry, defaultKeyTransform, defaultTagTransform, typ);
-        const defaultLookupDecode = forTypeFromLookup(backend, registry, defaultKeyTransform, defaultTagTransform, typ);
-        const decodeWith = (rules, map_1) => Result_Map((value_1) => value_1, ((rules === caseRules) ? defaultPlan : forType(backend, registry, (fieldName_1) => resolveKey(aliases, rules, fieldName_1), (name_1) => applyCaseRule(rules, name_1), typ)).Decode(map_1));
-        const encodeWith = (rules_1, record) => Encode_toJson(backend, ((rules_1 === caseRules) ? defaultPlan : forType(backend, registry, (fieldName_2) => resolveKey(aliases, rules_1, fieldName_2), (name_2) => applyCaseRule(rules_1, name_2), typ)).Encode(record));
-        return new TypedJson$1(curry2(decodeWith)(caseRules), curry2(encodeWith)(caseRules), decodeWith, encodeWith, (map) => Result_Map((value) => value, defaultLookupDecode(stringMapSource(backend, map))), caseRules, aliases, (newRules) => build(aliases, newRules), (newAliases) => build(newAliases, caseRules));
-    };
-    return build(empty({
-        Compare: (x, y) => (comparePrimitives(x, y) | 0),
-    }), 1);
-}
-
-class JSBackendImpl {
-    constructor() {
-    }
-    NewMap() {
-        return {};
-    }
-    ContainsKey(map, key) {
-        return key in map;
-    }
-    Get(map, key) {
-        return map[key];
-    }
-    Put(map, key, value) {
-        return (map[key] = value, map);
-    }
-    ParseRaw(json) {
-        return JSON.parse(json);
-    }
-    Stringify(value) {
-        return JSON.stringify(value);
-    }
-    IsString(value) {
-        return (typeof value) === "string";
-    }
-    IsInt(value) {
-        return ((typeof value) === "number") && (Number.isInteger(value));
-    }
-    IsFloat(value) {
-        return ((typeof value) === "number") && !(Number.isInteger(value));
-    }
-    IsBool(value) {
-        return (typeof value) === "boolean";
-    }
-    IsNull(value) {
-        return Operators_IsNull(value);
-    }
-    IsArray(value) {
-        return Array.isArray(value);
-    }
-    IsMap(value) {
-        return (((typeof value) === "object") && !Operators_IsNull(value)) && !Array.isArray(value);
-    }
-    AsString(value) {
-        return value;
-    }
-    AsInt(value) {
-        return value | 0;
-    }
-    AsFloat(value) {
-        return value;
-    }
-    AsBool(value) {
-        return value;
-    }
-    ArrayLength(arr) {
-        return arr.length | 0;
-    }
-    ArrayAt(arr, i) {
-        return arr[i];
-    }
-    BuildArray(items) {
-        return toArray(items);
-    }
-    get Null() {
-        return defaultOf();
-    }
-}
-function JSBackendImpl_$ctor() {
-    return new JSBackendImpl();
-}
-const js$1 = JSBackendImpl_$ctor();
-
-const js = js$1;
-/**
- * Parse a JSON string into the backend's native map representation.
- * Equivalent to `js.ParseRaw json`; provided for convenience.
- */
-function parseRaw(json) {
-    return js.ParseRaw(json);
-}
-
-const runnerResult = buildCodec(js, emptyRegistry, RunnerResult_$reflection());
-function decodeResult(json) {
-    return runnerResult.decode(parseRaw(json));
-}
-
-/**
- * Resolve a prebuilt image or build the bundled credential-free runner locally.
- *
- * decision: builds the bundled runner when no image is supplied so the Action has no external hosting prerequisite
- * tradeoff: increases cold-start time until release automation can publish a versioned runner image
- */
-function RunnerImage_resolve(runtime, configuredImage, actionRoot) {
-    return singleton$1.Delay(() => {
-        if (!isNullOrWhiteSpace(configuredImage)) {
-            return singleton$1.Return(configuredImage);
-        }
-        else {
-            const runId = process.env["GITHUB_RUN_ID"] ?? '';
-            const image = concat$1("paketabot-runner:", isNullOrWhiteSpace(runId) ? "local" : runId);
-            info(concat$1("Building bundled Paket runner image ", image));
-            const options = {
-                timeout: 600000,
-                maxBuffer: 16777216,
-            };
-            return singleton$1.Bind(awaitPromise(execFile(runtime, ["build", "--file", join$1(actionRoot, "Containerfile.runner"), "--tag", image, actionRoot], options)), (_arg) => singleton$1.Return(image));
-        }
-    });
-}
-class ContainerRunner {
-    runtime;
-    image;
-    constructor(runtime, image) {
-        this.runtime = runtime;
-        this.image = image;
-    }
-    Run(request) {
-        const this$ = this;
-        return singleton$1.Delay(() => singleton$1.Bind(awaitPromise(mkdtemp(join$1(tmpdir(), "paketabot-run-"))), (_arg) => {
-            const outputDirectory = _arg;
-            return singleton$1.Bind(singleton$1.Delay(() => singleton$1.TryWith(singleton$1.Delay(() => {
-                const options = {
-                    timeout: 600000,
-                    maxBuffer: 1048576,
-                };
-                return singleton$1.Bind(awaitPromise(execFile(this$.runtime, ContainerRunner__Arguments_76A5BAF9(this$, request, outputDirectory, "result.json"), options)), (_arg_1) => singleton$1.Bind(awaitPromise(readFile(join$1(outputDirectory, "result.json"), "utf8")), (_arg_2) => {
-                    const matchValue = decodeResult(_arg_2);
-                    if (matchValue.tag === /* Error */ 1) {
-                        const errors = matchValue.fields[0];
-                        return singleton$1.Return(new RunnerResult(RunnerStatus.Failed, undefined, empty$1(), map(toString$2, errors)));
-                    }
-                    else {
-                        const value = matchValue.fields[0];
-                        return singleton$1.Return(value);
-                    }
-                }));
-            }), (_arg_3) => singleton$1.Return(new RunnerResult(RunnerStatus.Failed, undefined, empty$1(), singleton(_arg_3.message))))), (_arg_4) => singleton$1.Bind(awaitPromise(rm$1(outputDirectory, {
-                recursive: true,
-                force: true,
-            })), () => singleton$1.Return(_arg_4)));
-        }));
-    }
-}
-function ContainerRunner_$ctor_Z384F8060(runtime, image) {
-    return new ContainerRunner(runtime, image);
-}
-function ContainerRunner__Arguments_76A5BAF9(_, request, outputDirectory, outputFile) {
-    return ["run", "--rm", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--memory=768m", "--cpus=1", "--pids-limit=128", `--user=${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`, "--env=HOME=/tmp", "--env=DOTNET_CLI_HOME=/tmp/dotnet", "--env=DOTNET_NOLOGO=1", "--env=DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1", "--tmpfs=/tmp:rw,noexec,nosuid,size=512m", concat$1("--volume=", request.ArtifactPath, ":/input/repository.tar.gz:ro"), concat$1("--volume=", outputDirectory, ":/output:rw"), _.image, "/input/repository.tar.gz", concat$1("/output/", outputFile)];
 }
 
 function requiredInput(name) {
@@ -40756,66 +42459,148 @@ function repositoryParts(value) {
             throw new Exception("GITHUB_REPOSITORY must have the form owner/name");
     }
 }
-function actionRoot() {
-    return dirname(dirname(fileURLToPath(import.meta.url)));
+function requireValid(result) {
+    if (result.tag === /* Error */ 1) {
+        throw new Exception(result.fields[0]);
+    }
 }
-function start() {
-    return singleton$1.Delay(() => singleton$1.TryWith(singleton$1.Delay(() => {
-        const token = requiredInput("token");
-        setSecret(token);
+function failureMessage(messages) {
+    if (isEmpty(messages)) {
+        return "PaketaBot failed without details.";
+    }
+    else {
+        return join("\n", messages);
+    }
+}
+function writeResolution(path, artifact) {
+    return singleton.Delay(() => singleton.Bind(awaitPromise(mkdir(dirname(path), {
+        recursive: true,
+    })), () => singleton.Bind(awaitPromise(writeFile$1(path, encodeArtifact(artifact))), () => singleton.Return(undefined))));
+}
+function resolveDependencies() {
+    return singleton.Delay(() => {
         const workspace = requiredEnvironment("GITHUB_WORKSPACE");
-        const patternInput = repositoryParts(requiredEnvironment("GITHUB_REPOSITORY"));
-        const runtime = requiredInput("container-runtime");
-        const configuredImage = getInput("runner-image");
-        const github = OctokitGateway_$ctor_Z721C83C5(token);
-        return singleton$1.Bind(github.GetRepository(patternInput[0], patternInput[1]), (_arg) => {
-            const repository = _arg;
-            const gitOptions = {
-                cwd: workspace,
-                timeout: 30000,
-                maxBuffer: 1048576,
-            };
-            return singleton$1.Bind(awaitPromise(execFile("git", ["rev-parse", "HEAD"], gitOptions)), (_arg_1) => {
-                let matchValue = undefined;
-                const baseSha = _arg_1[0].trim();
-                return singleton$1.Combine((matchValue = Checkouts_validate(repository.DefaultBranch, requiredEnvironment("GITHUB_REF"), requiredEnvironment("GITHUB_SHA"), baseSha), (matchValue.tag === /* Error */ 1) ? (((() => {
-                    throw new Exception(matchValue.fields[0]);
-                })(), singleton$1.Zero())) : (singleton$1.Zero())), singleton$1.Delay(() => {
-                    const artifacts = GitArtifactStore_$ctor_Z384F8060(workspace, join$1(requiredEnvironment("RUNNER_TEMP"), "paketabot-artifacts"));
-                    return singleton$1.Bind(RunnerImage_resolve(runtime, configuredImage, actionRoot()), (_arg_2) => {
-                        const service = UpdateService_$ctor_18D3CDF0(github, artifacts, ContainerRunner_$ctor_Z384F8060(runtime, _arg_2));
-                        return singleton$1.Bind(UpdateService__Run_34996A81(service, repository, baseSha), (_arg_3) => {
-                            const outcome = _arg_3;
-                            switch (outcome.tag) {
-                                case /* Published */ 0: {
-                                    const publication = outcome.fields[0];
-                                    info(`Published pull request #${publication.PullRequestNumber}.`);
-                                    setOutput("outcome", "published");
-                                    setOutput("pull-request-number", publication.PullRequestNumber);
-                                    return singleton$1.Zero();
-                                }
-                                case /* RunFailed */ 2: {
-                                    const messages = outcome.fields[0];
-                                    const message_1 = isEmpty(messages) ? "PaketaBot failed without details." : join("\n", messages);
-                                    setOutput("outcome", "failed");
-                                    setFailed(message_1);
-                                    return singleton$1.Zero();
-                                }
-                                default: {
-                                    info("Paket dependencies are already current.");
-                                    setOutput("outcome", "unchanged");
-                                    return singleton$1.Zero();
-                                }
+        const repository = requiredEnvironment("GITHUB_REPOSITORY");
+        const eventSha = requiredEnvironment("GITHUB_SHA");
+        const resultPath = requiredInput("result-path");
+        const paketPath = requiredInput("paket-path");
+        const gitOptions = {
+            cwd: workspace,
+            timeout: 30000,
+            maxBuffer: 1048576,
+        };
+        return singleton.Bind(awaitPromise(execFile("git", ["rev-parse", "HEAD"], gitOptions)), (_arg) => {
+            const checkoutSha = _arg[0].trim();
+            requireValid(Checkouts_validateRevision(eventSha, checkoutSha));
+            const resolver = PaketResolver_$ctor_30230F9B(workspace, paketPath, join$1(requiredEnvironment("RUNNER_TEMP"), "paketabot-home"));
+            return singleton.Bind(ResolveService__Run(ResolveService_$ctor_F180EBC(resolver)), (_arg_1) => {
+                const result_1 = _arg_1;
+                return singleton.Bind(writeResolution(resultPath, new ResolutionArtifact(repository, checkoutSha, result_1)), () => {
+                    const matchValue = result_1.Status;
+                    let matchResult = undefined;
+                    switch (matchValue.tag) {
+                        case /* NoChange */ 0: {
+                            matchResult = 0;
+                            break;
+                        }
+                        case /* Updated */ 1: {
+                            if (result_1.LockFile != null) {
+                                matchResult = 1;
                             }
-                        });
-                    });
-                }));
+                            else {
+                                matchResult = 2;
+                            }
+                            break;
+                        }
+                        default:
+                            matchResult = 2;
+                    }
+                    switch (matchResult) {
+                        case 0: {
+                            info("Paket dependencies are already current.");
+                            setOutput("outcome", "unchanged");
+                            return singleton.Zero();
+                        }
+                        case 1: {
+                            info("Paket dependency resolution produced an updated lock file.");
+                            setOutput("outcome", "updated");
+                            return singleton.Zero();
+                        }
+                        default: {
+                            setOutput("outcome", "failed");
+                            setFailed(failureMessage(result_1.Messages));
+                            return singleton.Zero();
+                        }
+                    }
+                });
             });
         });
-    }), (_arg_4) => {
+    });
+}
+function publishResolution(token) {
+    return singleton.Delay(() => {
+        const repositoryName = requiredEnvironment("GITHUB_REPOSITORY");
+        const eventSha = requiredEnvironment("GITHUB_SHA");
+        const resultPath = requiredInput("result-path");
+        return singleton.Bind(awaitPromise(readFile(resultPath, "utf8")), (_arg) => {
+            let artifact;
+            const matchValue = decodeArtifact(_arg);
+            if (matchValue.tag === /* Error */ 1) {
+                throw new Exception(failureMessage(map(toString$2, matchValue.fields[0])));
+            }
+            else {
+                artifact = matchValue.fields[0];
+            }
+            requireValid(ResolutionArtifacts_validate(repositoryName, eventSha, artifact));
+            const patternInput = repositoryParts(repositoryName);
+            const github = OctokitGateway_$ctor_Z721C83C5(token);
+            return singleton.Bind(github.GetRepository(patternInput[0], patternInput[1]), (_arg_1) => {
+                const repository = _arg_1;
+                requireValid(Checkouts_validate(repository.DefaultBranch, requiredEnvironment("GITHUB_REF"), eventSha, artifact.BaseSha));
+                return singleton.Bind(PublishService__Run_Z750F7FC2(PublishService_$ctor_1622FD4C(github), repository, artifact.BaseSha, artifact.Result), (_arg_2) => {
+                    const outcome = _arg_2;
+                    switch (outcome.tag) {
+                        case /* Published */ 0: {
+                            const publication = outcome.fields[0];
+                            info(`Published pull request #${publication.PullRequestNumber}.`);
+                            setOutput("outcome", "published");
+                            setOutput("pull-request-number", publication.PullRequestNumber);
+                            return singleton.Zero();
+                        }
+                        case /* RunFailed */ 2: {
+                            const messages_1 = outcome.fields[0];
+                            setOutput("outcome", "failed");
+                            setFailed(failureMessage(messages_1));
+                            return singleton.Zero();
+                        }
+                        default: {
+                            throw new Exception("the publisher received an unchanged resolution");
+                        }
+                    }
+                });
+            });
+        });
+    });
+}
+function start() {
+    return singleton.Delay(() => singleton.TryWith(singleton.Delay(() => {
+        const token = getInput("token");
+        return singleton.Combine(!isNullOrWhiteSpace(token) ? ((setSecret(token), singleton.Zero())) : singleton.Zero(), singleton.Delay(() => {
+            let operation;
+            const matchValue = ActionOperationModule_parse(requiredInput("operation"));
+            if (matchValue.tag === /* Error */ 1) {
+                throw new Exception(matchValue.fields[0]);
+            }
+            else {
+                operation = matchValue.fields[0];
+            }
+            requireValid(ActionOperationModule_validateToken(operation, !isNullOrWhiteSpace(token)));
+            return (operation.tag === /* PublishOperation */ 1) ? singleton.Bind(publishResolution(token), () => singleton.Return(undefined)) : singleton.Bind(resolveDependencies(), () => singleton.Return(undefined));
+        }));
+    }), (_arg_2) => {
         setOutput("outcome", "failed");
-        setFailed(_arg_4.message);
-        return singleton$1.Zero();
+        setFailed(_arg_2.message);
+        return singleton.Zero();
     }));
 }
 (function (_arg) {

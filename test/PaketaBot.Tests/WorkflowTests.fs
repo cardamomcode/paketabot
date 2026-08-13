@@ -33,14 +33,14 @@ type private GitHub(previousPublication: Publication option) =
                 }
             }
 
-type private Artifacts() =
-    interface IArtifactStore with
-        member _.Create(_, _) =
-            async { return "/artifacts/repository.tar.gz" }
+type private Resolver(result: ResolutionResult) =
+    interface IPaketResolver with
+        member _.Resolve() = async { return result }
 
-type private Runner(result: RunnerResult) =
-    interface ISandboxRunner with
-        member _.Run _ = async { return result }
+type private ThrowingResolver() =
+    interface IPaketResolver with
+        member _.Resolve() =
+            async { return failwith "resolution crashed" }
 
 let private repository = {
     Owner = "example"
@@ -48,32 +48,53 @@ let private repository = {
     DefaultBranch = "main"
 }
 
-let private updateTests =
+let private updatedResult = {
+    Status = Updated
+    LockFile = Some "NUGET\n  specs:\n    Fable.Core (5.2.0)"
+    Changes = [
+        {
+            Name = "Fable.Core"
+            Previous = "5.1.0"
+            Current = "5.2.0"
+        }
+    ]
+    Messages = []
+}
+
+let private resolveTests =
     testList (
-        "updates",
+        "resolve",
+        [
+            testAsync (
+                "returns the credential-free resolver result",
+                fun _ ->
+                    async {
+                        let! result = ResolveService(Resolver updatedResult).Run()
+                        assertThat result (isEqualTo updatedResult)
+                    }
+            )
+            testAsync (
+                "turns resolver exceptions into a typed failure",
+                fun _ ->
+                    async {
+                        let! result = ResolveService(ThrowingResolver()).Run()
+                        assertThat result.Status (isEqualTo Failed)
+                        assertThat result.Messages (isEqualTo [ "resolution crashed" ])
+                    }
+            )
+        ]
+    )
+
+let private publishTests =
+    testList (
+        "publish",
         [
             testAsync (
                 "publishes one stable marked pull request",
                 fun _ ->
                     async {
                         let github = GitHub(None)
-
-                        let runner =
-                            Runner {
-                                Status = Updated
-                                LockFile = Some "NUGET\n  specs:\n    Fable.Core (5.2.0)"
-                                Changes = [
-                                    {
-                                        Name = "Fable.Core"
-                                        Previous = "5.1.0"
-                                        Current = "5.2.0"
-                                    }
-                                ]
-                                Messages = []
-                            }
-
-                        let service = UpdateService(github, Artifacts(), runner)
-                        let! outcome = service.Run(repository, String.replicate 40 "a")
+                        let! outcome = PublishService(github).Run(repository, String.replicate 40 "a", updatedResult)
 
                         match outcome, github.Published with
                         | Published publication, Some update ->
@@ -91,39 +112,33 @@ let private updateTests =
                     async {
                         let github = GitHub(None)
 
-                        let runner =
-                            Runner {
-                                Status = NoChange
-                                LockFile = None
-                                Changes = []
-                                Messages = []
-                            }
+                        let unchanged = {
+                            Status = NoChange
+                            LockFile = None
+                            Changes = []
+                            Messages = []
+                        }
 
-                        let service = UpdateService(github, Artifacts(), runner)
-                        let! outcome = service.Run(repository, String.replicate 40 "a")
-
+                        let! outcome = PublishService(github).Run(repository, String.replicate 40 "a", unchanged)
                         assertThat outcome (isEqualTo Unchanged)
                         assertThat github.Published.IsNone isTrue
                     }
             )
             testAsync (
-                "surfaces runner failures without publishing",
+                "surfaces resolution failures without publishing",
                 fun _ ->
                     async {
                         let github = GitHub(None)
 
-                        let runner =
-                            Runner {
-                                Status = Failed
-                                LockFile = None
-                                Changes = []
-                                Messages = [ "runner timed out" ]
-                            }
+                        let failed = {
+                            Status = Failed
+                            LockFile = None
+                            Changes = []
+                            Messages = [ "resolver timed out" ]
+                        }
 
-                        let service = UpdateService(github, Artifacts(), runner)
-                        let! outcome = service.Run(repository, String.replicate 40 "a")
-
-                        assertThat outcome (isEqualTo (RunFailed [ "runner timed out" ]))
+                        let! outcome = PublishService(github).Run(repository, String.replicate 40 "a", failed)
+                        assertThat outcome (isEqualTo (RunFailed [ "resolver timed out" ]))
                         assertThat github.Published.IsNone isTrue
                     }
             )
@@ -138,17 +153,7 @@ let private updateTests =
                         }
 
                         let github = GitHub(Some previous)
-
-                        let runner =
-                            Runner {
-                                Status = Updated
-                                LockFile = Some "NUGET"
-                                Changes = []
-                                Messages = []
-                            }
-
-                        let service = UpdateService(github, Artifacts(), runner)
-                        let! _ = service.Run(repository, String.replicate 40 "a")
+                        let! _ = PublishService(github).Run(repository, String.replicate 40 "a", updatedResult)
 
                         match github.Published with
                         | Some update -> assertThat update.PreviousPublication (isEqualTo (Some previous))
@@ -158,4 +163,4 @@ let private updateTests =
         ]
     )
 
-let tests = testList ("workflow", [ updateTests ])
+let tests = testList ("workflow", [ resolveTests; publishTests ])

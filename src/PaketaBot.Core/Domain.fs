@@ -17,23 +17,23 @@ type VersionChange = {
     Current: string
 }
 
-type RunnerRequest = {
-    Repository: string
-    BaseSha: string
-    ArtifactPath: string
-}
-
-type RunnerStatus =
+type ResolutionStatus =
     | NoChange
     | Updated
     | Rejected
     | Failed
 
-type RunnerResult = {
-    Status: RunnerStatus
+type ResolutionResult = {
+    Status: ResolutionStatus
     LockFile: string option
     Changes: VersionChange list
     Messages: string list
+}
+
+type ResolutionArtifact = {
+    Repository: string
+    BaseSha: string
+    Result: ResolutionResult
 }
 
 type Publication = {
@@ -58,6 +58,41 @@ type UpdateOutcome =
     | Unchanged
     | RunFailed of messages: string list
 
+type ActionOperation =
+    | ResolveOperation
+    | PublishOperation
+
+module ActionOperation =
+    let parse (value: string) =
+        match value.Trim().ToLowerInvariant() with
+        | "resolve" -> Ok ResolveOperation
+        | "publish" -> Ok PublishOperation
+        | _ -> Error "the operation input must be resolve or publish"
+
+    /// Enforce the credential contract before either Action operation starts.
+    ///
+    /// decision: makes token absence an executable resolver precondition in addition to the separate-job workflow boundary
+    /// invariant: resolve rejects a supplied publisher token and publish rejects a missing publisher token
+    let validateToken operation hasToken =
+        match operation, hasToken with
+        | ResolveOperation, false
+        | PublishOperation, true -> Ok()
+        | ResolveOperation, true -> Error "the resolve operation must not receive a GitHub token"
+        | PublishOperation, false -> Error "the publish operation requires a GitHub token"
+
+module ResolutionArtifacts =
+    /// Bind a downloaded resolution artifact to the caller repository and event revision.
+    ///
+    /// decision: carries repository and SHA through the artifact because jobs do not share process state
+    /// invariant: publication rejects an artifact created for another repository or revision
+    let validate expectedRepository expectedSha (artifact: ResolutionArtifact) =
+        if not (String.Equals(artifact.Repository, expectedRepository, StringComparison.Ordinal)) then
+            Error "the resolution artifact belongs to another repository"
+        elif not (String.Equals(artifact.BaseSha, expectedSha, StringComparison.Ordinal)) then
+            Error "the resolution artifact belongs to another revision"
+        else
+            Ok()
+
 module PullRequests =
     [<Literal>]
     let Marker = "<!-- paketabot:weekly -->"
@@ -81,19 +116,23 @@ module PaketFiles =
         String.Equals(path, Lock, StringComparison.Ordinal)
 
 module Checkouts =
-    /// Require Action execution to use the event's exact default-branch revision.
+    let validateRevision eventSha resolvedSha =
+        if String.Equals(eventSha, resolvedSha, StringComparison.Ordinal) then
+            Ok()
+        else
+            Error "the resolved commit does not match GITHUB_SHA"
+
+    /// Require publication to use the event's exact default-branch resolution.
     ///
     /// decision: rejects non-default manual-dispatch refs so the pull request tree always derives from its declared base branch
-    /// invariant: the archived checkout SHA equals GITHUB_SHA and GITHUB_REF names the repository default branch
-    let validate defaultBranch eventRef eventSha checkoutSha =
+    /// invariant: the resolved SHA equals GITHUB_SHA and GITHUB_REF names the repository default branch
+    let validate defaultBranch eventRef eventSha resolvedSha =
         let expectedRef = $"refs/heads/{defaultBranch}"
 
         if not (String.Equals(eventRef, expectedRef, StringComparison.Ordinal)) then
             Error $"PaketaBot must run from the default branch ({expectedRef})"
-        elif not (String.Equals(eventSha, checkoutSha, StringComparison.Ordinal)) then
-            Error "the checked-out commit does not match GITHUB_SHA"
         else
-            Ok()
+            validateRevision eventSha resolvedSha
 
 module Branches =
     [<Literal>]

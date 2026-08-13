@@ -46,11 +46,8 @@ let mkdir path options = callMkdir mkdirNative path options
 [<Import("readFile", "node:fs/promises")>]
 let readFile (path: string) (encoding: string) : JS.Promise<string> = jsNative
 
-[<Import("mkdtemp", "node:fs/promises")>]
-let mkdtemp (prefix: string) : JS.Promise<string> = jsNative
-
-[<Import("rm", "node:fs/promises")>]
-let removePath (path: string) (options: obj) : JS.Promise<unit> = jsNative
+[<Import("writeFile", "node:fs/promises")>]
+let writeFile (path: string) (content: string) : JS.Promise<unit> = jsNative
 
 [<Import("dirname", "node:path")>]
 let dirname (path: string) : string = jsNative
@@ -58,23 +55,8 @@ let dirname (path: string) : string = jsNative
 [<Import("join", "node:path")>]
 let join ([<ParamArray>] paths: string array) : string = jsNative
 
-[<Import("tmpdir", "node:os")>]
-let tempDirectory () : string = jsNative
-
-[<Import("fileURLToPath", "node:url")>]
-let fileUrlToPath (value: string) : string = jsNative
-
-[<Emit("import.meta.url")>]
-let moduleUrl: string = jsNative
-
 [<Emit("process.env[$0] ?? ''")>]
 let env (name: string) : string = jsNative
-
-[<Emit("process.getuid?.() ?? 1000")>]
-let userId () : int = jsNative
-
-[<Emit("process.getgid?.() ?? 1000")>]
-let groupId () : int = jsNative
 
 [<Emit("Buffer.from($0, 'utf8').toString('base64')")>]
 let toBase64 (value: string) : string = jsNative

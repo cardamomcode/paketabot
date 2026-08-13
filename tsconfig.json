@@ -16,8 +16,6 @@
   },
   "include": [
     "build/ts/app/**/*.ts",
-    "build/ts/app/**/*.js",
-    "build/ts/runner/**/*.ts",
-    "build/ts/runner/**/*.js"
+    "build/ts/app/**/*.js"
   ]
 }

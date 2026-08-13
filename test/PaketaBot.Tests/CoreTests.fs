@@ -117,7 +117,93 @@ let private checkoutTests =
                 fun _ ->
                     assertThat
                         (Checkouts.validate "main" "refs/heads/main" "abc" "def")
-                        (isEqualTo (Error "the checked-out commit does not match GITHUB_SHA"))
+                        (isEqualTo (Error "the resolved commit does not match GITHUB_SHA"))
+            )
+        ]
+    )
+
+let private actionOperationTests =
+    testList (
+        "action operation",
+        [
+            test (
+                "requires the publisher token only for publish",
+                fun _ ->
+                    assertThat (ActionOperation.validateToken ResolveOperation false) (isEqualTo (Ok()))
+                    assertThat (ActionOperation.validateToken PublishOperation true) (isEqualTo (Ok()))
+            )
+            test (
+                "rejects a publisher token in resolve",
+                fun _ ->
+                    assertThat
+                        (ActionOperation.validateToken ResolveOperation true)
+                        (isEqualTo (Error "the resolve operation must not receive a GitHub token"))
+            )
+            test (
+                "requires a publisher token for publish",
+                fun _ ->
+                    assertThat
+                        (ActionOperation.validateToken PublishOperation false)
+                        (isEqualTo (Error "the publish operation requires a GitHub token"))
+            )
+        ]
+    )
+
+let private artifactTests =
+    testList (
+        "resolution artifact",
+        [
+            test (
+                "accepts the caller repository and revision",
+                fun _ ->
+                    let artifact = {
+                        Repository = "example/service"
+                        BaseSha = "abc"
+                        Result = {
+                            Status = NoChange
+                            LockFile = None
+                            Changes = []
+                            Messages = []
+                        }
+                    }
+
+                    assertThat (ResolutionArtifacts.validate "example/service" "abc" artifact) (isEqualTo (Ok()))
+            )
+            test (
+                "rejects another repository",
+                fun _ ->
+                    let artifact = {
+                        Repository = "other/service"
+                        BaseSha = "abc"
+                        Result = {
+                            Status = NoChange
+                            LockFile = None
+                            Changes = []
+                            Messages = []
+                        }
+                    }
+
+                    assertThat
+                        (ResolutionArtifacts.validate "example/service" "abc" artifact)
+                        (isEqualTo (Error "the resolution artifact belongs to another repository"))
+            )
+            test (
+                "rejects another revision",
+                fun _ ->
+                    let artifact = {
+                        Repository = "example/service"
+                        BaseSha = "def"
+                        Result = {
+                            Status = NoChange
+                            LockFile = None
+                            Changes = []
+                            Messages = []
+                        }
+                    }
+
+                    assertThat
+                        (ResolutionArtifacts.validate "example/service" "abc" artifact)
+                        (isEqualTo (Error "the resolution artifact belongs to another revision"))
             )
         ]
     )
@@ -172,6 +258,8 @@ let tests =
             lockDiffTests
             pullRequestTests
             checkoutTests
+            actionOperationTests
+            artifactTests
             publicationPathTests
             branchTests
         ]

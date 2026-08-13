@@ -29,4 +29,3 @@ jobs:
       - run: pnpm check
       - run: pnpm test
       - run: git diff --exit-code -- dist
-      - run: docker build -f Containerfile.runner -t paketabot-runner:ci .

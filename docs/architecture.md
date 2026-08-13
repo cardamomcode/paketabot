@@ -3,52 +3,58 @@
 ## Components
 
 ```text
-GitHub schedule / workflow_dispatch
+schedule / workflow_dispatch
               │
               ▼
-Node 24 Action host ─────────────── PAKETABOT_TOKEN
-              │                           │
-              │ tracked Git archive       │ publish paket.lock
-              ▼                           ▼
-credential-free Paket runner       paketabot/weekly + PR
+credential-free resolve job
+checkout → source policy → Paket
+              │
+              │ typed artifact: repository + SHA + result
+              ▼
+token-bearing publish job ───── PAKETABOT_TOKEN
               │
               ▼
-typed result: paket.lock + version summary
+paketabot/weekly + pull request
 ```
 
-`PaketaBot.Core` contains source eligibility rules, lock-file diffing, guarded
-branch transitions, ports, and the update service. It has no npm-specific
-behavior.
+`PaketaBot.Core` contains source eligibility rules, lock-file diffing, artifact
+validation, guarded branch transitions, ports, and the split resolve/publish
+services. It has no npm-specific behavior.
 
-`PaketaBot.App` is the JavaScript Action host. It contains narrow Fable bindings
-for the GitHub Actions toolkit and Node APIs, creates a credential-free Git
-archive, starts the container runner, and publishes through Octokit.
+`PaketaBot.App` is the internal JavaScript Action used in two modes. Resolve
+mode invokes Paket with an allowlisted child environment. Publish mode contains
+the narrow Fable binding for GitHub's Actions toolkit and Octokit.
 
-`PaketaBot.Runner` extracts one repository archive, validates its root Paket
-files, runs the image-pinned Paket CLI, and writes a typed result. It never
-receives `PAKETABOT_TOKEN` or checkout credentials.
+The reusable workflow in `.github/workflows/paketabot.yml` is the isolation
+mechanism. GitHub assigns the resolve and publish jobs fresh runners. The
+publisher receives the explicit secret but never checks out repository content;
+the resolver receives repository content but not the secret.
 
 The Fable output is validated with `tsc` and bundled with Rollup. Intermediate
-output under `build/` is ignored; GitHub's required self-contained Action
-bundles under `dist/` are generated and committed.
+output under `build/` is ignored; GitHub's required self-contained Action bundle
+under `dist/` is generated and committed.
 
 ## Update lifecycle
 
-1. A repository-local schedule or manual dispatch starts the Action.
-2. `actions/checkout` checks out the triggering default-branch commit without
-   persisting its credential; other refs and mismatched event SHAs are rejected.
-3. The host reads `PAKETABOT_TOKEN` and resolves the target repository through
-   the GitHub API.
-4. `git archive` packages only tracked files at the exact checkout SHA under one
-   synthetic root, omitting `.git` and untracked workspace files.
-5. The credential-free container accepts public NuGet.org dependencies and runs
-   `paket update --no-install`.
-6. The host discovers prior publication state from the marked pull request
-   created by the authenticated token identity.
-7. It publishes only `paket.lock` to `paketabot/weekly`, refusing untracked or
-   mismatched branch heads and using only non-forced fast-forwards.
-8. It creates or refreshes one pull request.
+1. A repository-local schedule or manual dispatch calls the reusable workflow.
+2. The resolve job checks out the triggering revision with persisted
+   credentials disabled.
+3. The resolver verifies that the checkout equals `GITHUB_SHA`, accepts only
+   root Paket files using public HTTPS NuGet.org, and runs
+   `paket update --no-install` with an allowlisted child environment.
+4. It uploads a typed artifact containing the caller repository, event SHA,
+   resolution status, lock file, and version summary.
+5. If the result is unchanged, the workflow finishes without starting the
+   publisher.
+6. A fresh publish job downloads the artifact and receives only the explicitly
+   mapped `PAKETABOT_TOKEN` secret.
+7. The publisher validates the artifact repository and SHA against its caller
+   context and requires the event ref to be the default branch.
+8. It discovers prior state from the marked pull request created by the token
+   identity and publishes only `paket.lock` to `paketabot/weekly`.
+9. Existing bot branches move only through non-forced fast-forwards from the
+   verified pull-request head.
 
-The workflow's concurrency group prevents overlapping scheduled and manual
-runs. There is no server, PostgreSQL database, webhook endpoint, or persistent
-job queue.
+The caller's concurrency group prevents overlapping scheduled and manual runs.
+There is no server, PostgreSQL database, webhook endpoint, persistent queue, or
+container runtime.

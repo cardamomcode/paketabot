@@ -1,4 +1,4 @@
-name: PaketaBot
+name: Paket dependencies
 
 on:
   schedule:
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   update:
-    uses: dbrattli/paketabot/.github/workflows/paketabot.yml@main
+    uses: ./.github/workflows/paketabot.yml
     permissions:
       contents: read
     secrets:

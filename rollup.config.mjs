@@ -16,23 +16,12 @@ const plugins = () => [
 
 const external = (id) => id.startsWith("node:");
 
-export default [
-  {
-    input: "build/js/app/Program.js",
-    output: {
-      file: "dist/index.js",
-      format: "es",
-    },
-    external,
-    plugins: plugins(),
+export default {
+  input: "build/js/app/Program.js",
+  output: {
+    file: "dist/index.js",
+    format: "es",
   },
-  {
-    input: "build/js/runner/Program.js",
-    output: {
-      file: "dist/runner.mjs",
-      format: "es",
-    },
-    external,
-    plugins: plugins(),
-  },
-];
+  external,
+  plugins: plugins(),
+};

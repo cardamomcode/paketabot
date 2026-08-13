@@ -2,19 +2,20 @@
 
 > The dependency bot that speaks Paket.
 
-PaketaBot is a repository-local GitHub Action that opens weekly pull requests
+PaketaBot is a reusable GitHub Actions workflow that opens weekly pull requests
 for dependencies managed by [Paket](https://fsprojects.github.io/Paket/). It
 fills the gap left by Dependabot's lack of `paket.dependencies` and
-`paket.lock` support without requiring a hosted service or database.
+`paket.lock` support without requiring a hosted service, database, or Docker.
 
 PaketaBot is written in F#, compiled to TypeScript with
-[Fable](https://fable.io/), and packaged as a Node 24 JavaScript Action.
+[Fable](https://fable.io/), and packaged as a Node 24 JavaScript Action used by
+the workflow's two jobs.
 
 ## Status
 
-This repository contains a private, pre-release vertical slice. It includes the
-domain workflow, token-authenticated GitHub publisher, credential-free
-container runner, guarded branch refresh, and Scriptorium test suite.
+This repository contains a private, pre-release vertical slice. It includes a
+credential-free resolver job, token-authenticated publisher job, guarded branch
+refresh, and Scriptorium test suite.
 
 V1 intentionally supports only repositories whose root `paket.dependencies`
 uses public HTTPS NuGet.org sources. Private feeds, Git dependencies, HTTP
@@ -30,38 +31,41 @@ repository secret `PAKETABOT_TOKEN`. The token needs:
 - Metadata: read
 
 Copy [`examples/paketabot.yml`](examples/paketabot.yml) into the consuming
-repository as `.github/workflows/paketabot.yml`. The important steps are:
+repository as `.github/workflows/paketabot.yml`. Its update job calls the
+reusable workflow and passes only the named secret:
 
 ```yaml
-permissions:
-  contents: read
-
-steps:
-  - uses: actions/checkout@v6
-    with:
-      persist-credentials: false
-  - uses: dbrattli/paketabot@main
-    with:
-      token: ${{ secrets.PAKETABOT_TOKEN }}
+jobs:
+  update:
+    uses: dbrattli/paketabot/.github/workflows/paketabot.yml@main
+    permissions:
+      contents: read
+    secrets:
+      paketabot_token: ${{ secrets.PAKETABOT_TOKEN }}
 ```
 
 The action repository is private during development, so GitHub repository
 settings must allow the consuming repository to access it. Published versions
 will use an immutable release reference instead of `main`.
 
-The workflow runs weekly and supports manual runs through `workflow_dispatch`.
+The example runs weekly and supports manual runs through `workflow_dispatch`.
 GitHub Actions concurrency prevents overlapping runs. PaketaBot refreshes only
-the `paketabot/weekly` branch and only publishes `paket.lock`. Manual runs must
+the `paketabot/weekly` branch and publishes only `paket.lock`. Manual runs must
 use the repository's default branch.
 
 ## Credential boundary
 
-The host Action receives `PAKETABOT_TOKEN`, creates a Git archive of the exact
-checked-out commit, and starts the Paket runner container. The archive excludes
-`.git` and untracked files. The runner inherits no environment variables,
-checkout credentials, or GitHub token from the host. It receives only fixed,
-non-secret runtime settings and returns a typed result containing the updated
-lock file and version summary.
+The reusable workflow has two fresh GitHub-hosted jobs:
+
+1. The resolver checks out the caller revision without persisting credentials,
+   validates the source policy, and runs `paket update --no-install`. It never
+   receives `PAKETABOT_TOKEN`, and Paket receives an allowlisted child-process
+   environment without Actions or GitHub credentials.
+2. The publisher downloads the typed result artifact but never checks out or
+   executes repository contents. Only this job receives `PAKETABOT_TOKEN`.
+
+The artifact records the caller repository and exact event SHA. The publisher
+rejects a mismatched artifact before using the token.
 
 The publisher treats a marked pull request created by the identity behind
 `PAKETABOT_TOKEN` as durable branch state. It refuses to overwrite an existing
@@ -81,7 +85,6 @@ Requirements:
 - .NET SDK 10
 - Node.js 24 and pnpm 10
 - Just
-- Docker or Podman to build and run the isolated Paket worker
 
 ```bash
 just setup
@@ -90,9 +93,8 @@ just check
 just test
 ```
 
-`just bundle` generates the committed `dist/index.js` host Action and
-`dist/runner.mjs` worker bundle. Files under `dist/` are generated artifacts and
-must not be edited manually.
+`just bundle` generates the committed `dist/index.js` Action bundle. Files
+under `dist/` are generated artifacts and must not be edited manually.
 
 See [Architecture](docs/architecture.md) and the
 [Threat model](docs/threat-model.md) for the trust boundary and remaining

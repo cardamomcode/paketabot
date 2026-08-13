@@ -9,7 +9,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "pnpm clean && dotnet fable src/PaketaBot.App/PaketaBot.App.fsproj --lang typescript --outDir build/ts/app && dotnet fable src/PaketaBot.Runner/PaketaBot.Runner.fsproj --lang typescript --outDir build/ts/runner && tsc -p tsconfig.json",
+    "build": "pnpm clean && dotnet fable src/PaketaBot.App/PaketaBot.App.fsproj --lang typescript --outDir build/ts/app && tsc -p tsconfig.json",
     "build:test": "node -e \"require('node:fs').rmSync('build/ts/test',{recursive:true,force:true});require('node:fs').rmSync('build/js/test',{recursive:true,force:true})\" && dotnet fable test/PaketaBot.Tests/PaketaBot.Tests.fsproj --lang typescript --outDir build/ts/test && tsc -p tsconfig.test.json",
     "bundle": "pnpm build && rollup --config rollup.config.mjs",
     "check": "dotnet build PaketaBot.slnx && pnpm bundle && pnpm build:test",
