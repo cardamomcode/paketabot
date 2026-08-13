@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "build/ts/test",
+    "outDir": "build/js/test",
+    "types": ["node"]
+  },
+  "include": [
+    "build/ts/test/**/*.ts",
+    "build/ts/test/**/*.js",
+    "test/**/*.d.ts"
+  ]
+}

@@ -1,0 +1,20 @@
+source https://api.nuget.org/v3/index.json
+storage: none
+framework: net10.0
+
+nuget FSharp.Core
+nuget Fable.Core >= 5.2.0
+nuget Fable.TypedJson >= 5.1.0
+nuget Fable.TypedJson.JS >= 5.1.0
+
+group Test
+    source https://api.nuget.org/v3/index.json
+    storage: none
+    framework: net10.0
+
+    nuget FSharp.Core
+    nuget Fable.Core >= 5.2.0
+    nuget Fable.TypedJson >= 5.1.0
+    nuget Fable.TypedJson.JS >= 5.1.0
+    nuget Scriptorium.Quill >= 0.5.1
+    nuget Scriptorium.Nib >= 0.4.1

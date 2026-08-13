@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "rootDir": "build/ts",
+    "outDir": "build/js",
+    "strict": true,
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "allowJs": true,
+    "rewriteRelativeImportExtensions": true,
+    "erasableSyntaxOnly": true,
+    "esModuleInterop": true,
+    "noEmitOnError": true
+  },
+  "include": [
+    "build/ts/app/**/*.ts",
+    "build/ts/app/**/*.js",
+    "build/ts/runner/**/*.ts",
+    "build/ts/runner/**/*.js"
+  ]
+}

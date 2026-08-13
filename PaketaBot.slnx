@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PaketaBot.Core/PaketaBot.Core.fsproj" />
+    <Project Path="src/PaketaBot.App/PaketaBot.App.fsproj" />
+    <Project Path="src/PaketaBot.Runner/PaketaBot.Runner.fsproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/PaketaBot.Tests/PaketaBot.Tests.fsproj" />
+  </Folder>
+</Solution>
+

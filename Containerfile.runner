@@ -1,0 +1,19 @@
+FROM node:24.13.0-bookworm-slim
+
+ARG DOTNET_VERSION=10.0.400
+ARG PAKET_VERSION=10.3.1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl tar \
+    && curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
+    && bash /tmp/dotnet-install.sh --version "${DOTNET_VERSION}" --install-dir /usr/share/dotnet \
+    && ln -s /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
+    && dotnet tool install --tool-path /opt/paket Paket --version "${PAKET_VERSION}" \
+    && rm -rf /var/lib/apt/lists/* /tmp/dotnet-install.sh
+
+ENV PATH="/opt/paket:${PATH}"
+WORKDIR /app
+COPY build/js/runner/ ./
+
+USER node
+ENTRYPOINT ["node", "/app/Program.js"]
