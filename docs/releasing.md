@@ -8,7 +8,7 @@ remaining public-release requirement is satisfied.
 
 ## Release invariants
 
-- Consumers reference an exact release such as the private preview `v0.1.0` or
+- Consumers reference an exact release such as the private preview `v0.1.1` or
   production `v1.0.0`, never `main` or a movable major tag.
 - Both internal Action steps in the reusable workflow reference that same exact
   release.
@@ -55,7 +55,8 @@ with exact `v1.0.0` self-references and publish the production release.
 ## Publish and verify
 
 1. Create a draft GitHub release whose tag and target are the reviewed release
-   commit. Mark `v0.1.0` as a pre-release; do not mark `v1.0.0` as a pre-release.
+   commit. Mark every `v0.x` private preview as a pre-release; do not mark
+   `v1.0.0` as a pre-release.
 2. Recheck the draft tag, generated bundle, workflow self-references, and
    release notes before publishing. Publication makes the release immutable.
 3. Run `workflow_dispatch` in a disposable repository containing an eligible

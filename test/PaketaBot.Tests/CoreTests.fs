@@ -66,6 +66,32 @@ let private lockDiffTests =
                             }
                         ])
             )
+            test (
+                "reports changed dependency requirements with their parent package",
+                fun _ ->
+                    let previous =
+                        "NUGET\n  specs:\n    Fable.Giraffe.Beam (5.4)\n      Fable.TypedJson (>= 5.0.1)\n      Fable.TypedJson.Beam (>= 5.0)"
+
+                    let current =
+                        "NUGET\n  specs:\n    Fable.Giraffe.Beam (5.4)\n      Fable.TypedJson (>= 5.1)\n      Fable.TypedJson.Beam (>= 5.1)"
+
+                    assertThat
+                        (LockDiff.requirementChanges previous current)
+                        (isEqualTo [
+                            {
+                                Name = "Fable.TypedJson"
+                                RequiredBy = "Fable.Giraffe.Beam"
+                                Previous = ">= 5.0.1"
+                                Current = ">= 5.1"
+                            }
+                            {
+                                Name = "Fable.TypedJson.Beam"
+                                RequiredBy = "Fable.Giraffe.Beam"
+                                Previous = ">= 5.0"
+                                Current = ">= 5.1"
+                            }
+                        ])
+            )
         ]
     )
 
@@ -94,6 +120,68 @@ let private pullRequestTests =
                 fun _ -> assertThat (PullRequests.isTrackedBody "update") isFalse
             )
             test ("rejects missing pull request bodies", fun _ -> assertThat (PullRequests.isTrackedBody null) isFalse)
+        ]
+    )
+
+let private pullRequestBodyTests =
+    testList (
+        "pull request body",
+        [
+            test (
+                "lists changed resolved package versions",
+                fun _ ->
+                    let body =
+                        PullRequestBody.render [
+                            {
+                                Name = "Fable.Core"
+                                Previous = "5.1.0"
+                                Current = "5.2.0"
+                            }
+                        ] []
+
+                    assertThat (body.Contains("| Package | From | To |")) isTrue
+                    assertThat (body.Contains("| `Fable.Core` | `5.1.0` | `5.2.0` |")) isTrue
+            )
+            test (
+                "lists changed dependency requirements without claiming version updates",
+                fun _ ->
+                    let body =
+                        PullRequestBody.render [] [
+                            {
+                                Name = "Fable.TypedJson"
+                                RequiredBy = "Fable.Giraffe.Beam"
+                                Previous = ">= 5.0.1"
+                                Current = ">= 5.1"
+                            }
+                        ]
+
+                    assertThat
+                        (body.Contains(
+                            "Paket refreshed dependency requirements recorded in `paket.lock` without changing resolved package versions."
+                        ))
+                        isTrue
+
+                    assertThat (body.Contains("| Package | Required by | From | To |")) isTrue
+
+                    assertThat
+                        (body.Contains("| `Fable.TypedJson` | `Fable.Giraffe.Beam` | `>= 5.0.1` | `>= 5.1` |"))
+                        isTrue
+
+                    assertThat (body.Contains("| Package | From | To |")) isFalse
+                    assertThat (body.Contains("PaketaBot updated the versions")) isFalse
+            )
+            test (
+                "describes an otherwise unsummarized lock refresh without an empty table",
+                fun _ ->
+                    let body = PullRequestBody.render [] []
+
+                    assertThat
+                        (body.Contains("Paket refreshed `paket.lock` without changing resolved package versions."))
+                        isTrue
+
+                    assertThat (body.Contains("| Package")) isFalse
+                    assertThat (body.Contains("PaketaBot updated the versions")) isFalse
+            )
         ]
     )
 
@@ -163,6 +251,7 @@ let private artifactTests =
                             Status = NoChange
                             LockFile = None
                             Changes = []
+                            RequirementChanges = []
                             Messages = []
                         }
                     }
@@ -179,6 +268,7 @@ let private artifactTests =
                             Status = NoChange
                             LockFile = None
                             Changes = []
+                            RequirementChanges = []
                             Messages = []
                         }
                     }
@@ -197,6 +287,7 @@ let private artifactTests =
                             Status = NoChange
                             LockFile = None
                             Changes = []
+                            RequirementChanges = []
                             Messages = []
                         }
                     }
@@ -257,6 +348,7 @@ let tests =
             eligibilityTests
             lockDiffTests
             pullRequestTests
+            pullRequestBodyTests
             checkoutTests
             actionOperationTests
             artifactTests

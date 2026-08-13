@@ -35020,6 +35020,22 @@ class VersionChange extends Record {
 function VersionChange_$reflection() {
     return record_type("PaketaBot.VersionChange", [], VersionChange, () => [["Name", string_type], ["Previous", string_type], ["Current", string_type]]);
 }
+class RequirementChange extends Record {
+    Name;
+    RequiredBy;
+    Previous;
+    Current;
+    constructor(Name, RequiredBy, Previous, Current) {
+        super();
+        this.Name = Name;
+        this.RequiredBy = RequiredBy;
+        this.Previous = Previous;
+        this.Current = Current;
+    }
+}
+function RequirementChange_$reflection() {
+    return record_type("PaketaBot.RequirementChange", [], RequirementChange, () => [["Name", string_type], ["RequiredBy", string_type], ["Previous", string_type], ["Current", string_type]]);
+}
 class ResolutionStatus extends Union {
     constructor(tag, fields) {
         super();
@@ -35043,17 +35059,19 @@ class ResolutionResult extends Record {
     Status;
     LockFile;
     Changes;
+    RequirementChanges;
     Messages;
-    constructor(Status, LockFile, Changes, Messages) {
+    constructor(Status, LockFile, Changes, RequirementChanges, Messages) {
         super();
         this.Status = Status;
         this.LockFile = LockFile;
         this.Changes = Changes;
+        this.RequirementChanges = RequirementChanges;
         this.Messages = Messages;
     }
 }
 function ResolutionResult_$reflection() {
-    return record_type("PaketaBot.ResolutionResult", [], ResolutionResult, () => [["Status", ResolutionStatus_$reflection()], ["LockFile", option_type(string_type)], ["Changes", list_type(VersionChange_$reflection())], ["Messages", list_type(string_type)]]);
+    return record_type("PaketaBot.ResolutionResult", [], ResolutionResult, () => [["Status", ResolutionStatus_$reflection()], ["LockFile", option_type(string_type)], ["Changes", list_type(VersionChange_$reflection())], ["RequirementChanges", list_type(RequirementChange_$reflection())], ["Messages", list_type(string_type)]]);
 }
 class ResolutionArtifact extends Record {
     Repository;
@@ -36802,6 +36820,7 @@ function EligibilityModule_inspect(dependencies) {
 }
 
 const packageLine = /^\s{4}([A-Za-z0-9_.-]+) \(([^ )]+)/gu;
+const requirementLine = /^\s{6}([A-Za-z0-9_.-]+) \(([^)]+)\)/gu;
 function packages(lockFile) {
     return ofArray(choose$2((line) => {
         const matched = match(packageLine, line);
@@ -36841,6 +36860,76 @@ function changes(previous, current) {
                 return undefined;
         }
     }, toList(packages(current)));
+}
+function requirements(lockFile) {
+    let requiredBy = undefined;
+    return ofArray(choose$2((line) => {
+        const packageMatch = match(packageLine, line);
+        if (packageMatch != null) {
+            requiredBy = (packageMatch[1] || "");
+            return undefined;
+        }
+        else {
+            const requirementMatch = match(requirementLine, line);
+            const requiredBy_1 = requiredBy;
+            const matchValue = requirementMatch != null;
+            let matchResult = undefined, parent = undefined;
+            if (requiredBy_1 != null) {
+                if (matchValue) {
+                    matchResult = 0;
+                    parent = value(requiredBy_1);
+                }
+                else {
+                    matchResult = 1;
+                }
+            }
+            else {
+                matchResult = 1;
+            }
+            switch (matchResult) {
+                case 0:
+                    return [[parent, requirementMatch[1] || ""], requirementMatch[2] || ""];
+                default:
+                    return undefined;
+            }
+        }
+    }, split(lockFile, ["\r", "\n"], undefined, 1)), {
+        Compare: (x, y) => (compareArrays(x, y) | 0),
+    });
+}
+/**
+ * Report dependency requirements recorded beneath each resolved package.
+ *
+ * decision: keys requirements by both parent and dependency because one package can require different ranges in one lock file
+ */
+function requirementChanges(previous, current) {
+    const before = requirements(previous);
+    return choose((tupledArg) => {
+        const _arg = tupledArg[0];
+        const currentRequirement = tupledArg[1];
+        const requiredBy = _arg[0];
+        const name = _arg[1];
+        const matchValue = tryFind([requiredBy, name], before);
+        let matchResult = undefined, previousRequirement_1 = undefined;
+        if (matchValue != null) {
+            if (value(matchValue) !== currentRequirement) {
+                matchResult = 0;
+                previousRequirement_1 = value(matchValue);
+            }
+            else {
+                matchResult = 1;
+            }
+        }
+        else {
+            matchResult = 1;
+        }
+        switch (matchResult) {
+            case 0:
+                return new RequirementChange(name, requiredBy, previousRequirement_1, currentRequirement);
+            default:
+                return undefined;
+        }
+    }, toList(requirements(current)));
 }
 
 class PaketResolver {
@@ -36883,14 +36972,14 @@ class PaketResolver {
                             const stderr = _arg_3[1];
                             return singleton.Bind(awaitPromise(readFile(lockPath, "utf8")), (_arg_4) => {
                                 const current = _arg_4;
-                                return (current === previous) ? singleton.Return(new ResolutionResult(ResolutionStatus.NoChange, undefined, empty$1(), empty$1())) : singleton.Return(new ResolutionResult(ResolutionStatus.Updated, current, changes(previous, current), isNullOrWhiteSpace(stderr) ? empty$1() : singleton$1(stderr.trim())));
+                                return (current === previous) ? singleton.Return(new ResolutionResult(ResolutionStatus.NoChange, undefined, empty$1(), empty$1(), empty$1())) : singleton.Return(new ResolutionResult(ResolutionStatus.Updated, current, changes(previous, current), requirementChanges(previous, current), isNullOrWhiteSpace(stderr) ? empty$1() : singleton$1(stderr.trim())));
                             });
                         });
                     });
                 }
                 else {
                     const reasons = matchValue.fields[0];
-                    return singleton.Return(new ResolutionResult(ResolutionStatus.Rejected, undefined, empty$1(), reasons));
+                    return singleton.Return(new ResolutionResult(ResolutionStatus.Rejected, undefined, empty$1(), empty$1(), reasons));
                 }
             });
         }));
@@ -36900,8 +36989,34 @@ function PaketResolver_$ctor_30230F9B(workspace, executable, isolatedHome) {
     return new PaketResolver(workspace, executable, isolatedHome);
 }
 
-function PullRequestBody_render(changes) {
-    return concat$1("<!-- paketabot:weekly -->", "\nPaketaBot updated the versions allowed by `paket.dependencies`.\n\n| Package | From | To |\n|---|---:|---:|\n", join("\n", map((change) => (`| \`${change.Name}\` | \`${change.Previous}\` | \`${change.Current}\` |`), changes)), "\n\nGenerated by PaketaBot. Repository CI remains responsible for validation.\n");
+/**
+ * Describe the observable lock-file change without inventing package upgrades.
+ *
+ * decision: reports dependency requirements separately because they can change without upgrading resolved packages
+ * invariant: an empty resolved-version diff never claims that package versions were updated
+ */
+function PullRequestBody_render(changes, requirementChanges) {
+    if (isEmpty(changes)) {
+        if (isEmpty(requirementChanges)) {
+            return concat$1("<!-- paketabot:weekly -->", "\nPaket refreshed `paket.lock` without changing resolved package versions.\n\nNo resolved version or dependency-requirement change could be summarized from the lock file.\n\nGenerated by PaketaBot. Repository CI remains responsible for validation.\n");
+        }
+        else {
+            return concat$1("<!-- paketabot:weekly -->", "\nPaket refreshed dependency requirements recorded in `paket.lock` without changing resolved package versions.\n\n| Package | Required by | From | To |\n|---|---|---:|---:|\n", join("\n", map((change) => (`| \`${change.Name}\` | \`${change.RequiredBy}\` | \`${change.Previous}\` | \`${change.Current}\` |`), requirementChanges)), "\n\nGenerated by PaketaBot. Repository CI remains responsible for validation.\n");
+        }
+    }
+    else {
+        const requirementChanges_2 = requirementChanges;
+        return `${"<!-- paketabot:weekly -->"}
+PaketaBot updated the versions allowed by \`paket.dependencies\`.
+
+| Package | From | To |
+|---|---:|---:|
+${join("\n", map((change_1) => (`| \`${change_1.Name}\` | \`${change_1.Previous}\` | \`${change_1.Current}\` |`), changes))}
+${isEmpty(requirementChanges_2) ? "" : concat$1("\n\nPaket also refreshed dependency requirements recorded in `paket.lock`.\n\n| Package | Required by | From | To |\n|---|---|---:|---:|\n", join("\n", map((change_2) => (`| \`${change_2.Name}\` | \`${change_2.RequiredBy}\` | \`${change_2.Previous}\` | \`${change_2.Current}\` |`), requirementChanges_2)), "\n")}
+
+Generated by PaketaBot. Repository CI remains responsible for validation.
+`;
+    }
 }
 class ResolveService {
     resolver;
@@ -36918,7 +37033,7 @@ function ResolveService_$ctor_F180EBC(resolver) {
  * invariant: resolver exceptions become typed failures that can cross the Actions artifact boundary
  */
 function ResolveService__Run(_) {
-    return singleton.Delay(() => singleton.TryWith(singleton.Delay(() => singleton.ReturnFrom(_.resolver.Resolve())), (_arg) => singleton.Return(new ResolutionResult(ResolutionStatus.Failed, undefined, empty$1(), singleton$1(_arg.message)))));
+    return singleton.Delay(() => singleton.TryWith(singleton.Delay(() => singleton.ReturnFrom(_.resolver.Resolve())), (_arg) => singleton.Return(new ResolutionResult(ResolutionStatus.Failed, undefined, empty$1(), empty$1(), singleton$1(_arg.message)))));
 }
 class PublishService {
     github;
@@ -36969,7 +37084,7 @@ function PublishService__Run_Z750F7FC2(_, repository, baseSha, result) {
                     const previousPublication = _arg;
                     return singleton.Bind(_.github.GetBranchHead(repository, "paketabot/weekly"), (_arg_1) => {
                         let option_1 = undefined;
-                        const publish = new PublishUpdate(repository, baseSha, "paketabot/weekly", "paket.lock", lockFile, "chore(deps): update Paket dependencies", PullRequestBody_render(result.Changes));
+                        const publish = new PublishUpdate(repository, baseSha, "paketabot/weekly", "paket.lock", lockFile, "chore(deps): update Paket dependencies", PullRequestBody_render(result.Changes, result.RequirementChanges));
                         let publicationPlan;
                         const matchValue_3 = Branches_planPublication(baseSha, (option_1 = previousPublication, (option_1 != null) ? value(option_1).HeadSha : undefined), _arg_1);
                         if (matchValue_3.tag === /* Error */ 1) {
