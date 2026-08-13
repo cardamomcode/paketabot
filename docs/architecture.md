@@ -57,8 +57,11 @@ were reviewed for that release.
    context and requires the event ref to be the default branch.
 8. It discovers prior state from the marked pull request created by the token
    identity and publishes only `paket.lock` to `paketabot/weekly`.
-9. Existing bot branches move only through non-forced fast-forwards from the
-   verified pull-request head.
+9. For an open owned pull request, it updates pull-request metadata before a
+   non-forced branch fast-forward, making the ref update the final API mutation.
+10. A lost API response is retried. If a new pull request was not created after
+    its branch moved, the next run fails closed until a maintainer follows the
+    [recovery procedure](recovery.md).
 
 The caller's concurrency group prevents overlapping scheduled and manual runs.
 There is no server, PostgreSQL database, webhook endpoint, persistent queue, or
