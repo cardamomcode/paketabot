@@ -1,6 +1,5 @@
 namespace PaketaBot.App
 
-open System
 open Fable.Core
 open Fable.Core.JsInterop
 open PaketaBot
@@ -8,61 +7,81 @@ open PaketaBot.App.Bindings
 
 module private GitHubValues =
     let data (response: obj) : obj = response?data
-    let sha (response: obj) : string = (data response)?sha
 
-    let permission value =
-        match string value with
-        | "admin" -> Admin
-        | "maintain" -> Maintain
-        | "write" -> Write
-        | "triage" -> Triage
-        | "read" -> Read
-        | _ -> NoAccess
+    let isTrackedPull repository publisherLogin (value: obj) =
+        let body: obj = value?body
+        let headRepository: obj = value?head?repo
 
-type OctokitGateway(app: GitHubApp) =
-    let client installationId =
-        getInstallationOctokit app installationId |> Async.AwaitPromise
+        not (isNull body)
+        && PullRequests.isOwnedBy publisherLogin (string value?user?login) (string body)
+        && not (isNull headRepository)
+        && string headRepository?full_name = Repository.fullName repository
+        && string value?head?``ref`` = Branches.Weekly
 
-    let call installationId route parameters =
-        async {
-            let! octokit = client installationId
-            return! request octokit route parameters |> Async.AwaitPromise
-        }
+type OctokitGateway(token: string) =
+    let client = getOctokit token
+    let mutable publisherLogin = None
+
+    let call route parameters =
+        request client route parameters |> Async.AwaitPromise
 
     let repoParameters repository = [ "owner" ==> repository.Owner; "repo" ==> repository.Name ]
 
+    let getPublisherLogin () =
+        async {
+            match publisherLogin with
+            | Some value -> return value
+            | None ->
+                let! response = call "GET /user" (createObj [])
+                let value: string = (GitHubValues.data response)?login
+                publisherLogin <- Some value
+                return value
+        }
+
+    let findPull repository state =
+        async {
+            let! expectedPublisher = getPublisherLogin ()
+
+            let! response =
+                call
+                    "GET /repos/{owner}/{repo}/pulls"
+                    (createObj (
+                        repoParameters repository
+                        @ [
+                            "state" ==> state
+                            "head" ==> $"{repository.Owner}:{Branches.Weekly}"
+                            "per_page" ==> 100
+                        ]
+                    ))
+
+            let pulls: obj array = unbox (GitHubValues.data response)
+            return pulls |> Array.tryFind (GitHubValues.isTrackedPull repository expectedPublisher)
+        }
+
     interface IGitHubGateway with
-        member _.GetDefaultHead repository =
+        member _.GetRepository(owner, name) =
             async {
-                let! response =
-                    call
-                        repository.InstallationId
-                        "GET /repos/{owner}/{repo}/git/ref/{ref}"
-                        (createObj (repoParameters repository @ [ "ref" ==> $"heads/{repository.DefaultBranch}" ]))
+                let! response = call "GET /repos/{owner}/{repo}" (createObj [ "owner" ==> owner; "repo" ==> name ])
+                let value = GitHubValues.data response
 
-                return (GitHubValues.data response)?``object``?sha
+                return {
+                    Owner = value?owner?login
+                    Name = value?name
+                    DefaultBranch = value?default_branch
+                }
             }
 
-        member _.DownloadArchive(repository, sha) =
+        member _.TryGetPublication repository =
             async {
-                let! response =
-                    call
-                        repository.InstallationId
-                        "GET /repos/{owner}/{repo}/tarball/{ref}"
-                        (createObj (repoParameters repository @ [ "ref" ==> sha ]))
+                let! pull = findPull repository "all"
 
-                return unbox<byte array> (GitHubValues.data response)
-            }
-
-        member _.GetPermission(repository, login) =
-            async {
-                let! response =
-                    call
-                        repository.InstallationId
-                        "GET /repos/{owner}/{repo}/collaborators/{username}/permission"
-                        (createObj (repoParameters repository @ [ "username" ==> login ]))
-
-                return GitHubValues.permission ((GitHubValues.data response)?permission)
+                return
+                    pull
+                    |> Option.map (fun value -> {
+                        Branch = Branches.Weekly
+                        PullRequestNumber = value?number
+                        HeadSha = value?head?sha
+                    })
             }
 
         member _.Publish update =
@@ -70,13 +89,13 @@ type OctokitGateway(app: GitHubApp) =
                 if not (Branches.isOwned update.Branch) then
                     invalidArg (nameof update.Branch) "PaketaBot can only publish its owned weekly branch"
 
-                let installationId = update.Repository.InstallationId
+                if not (PaketFiles.isLock update.Path) then
+                    invalidArg (nameof update.Path) "PaketaBot can only publish paket.lock"
+
                 let repo = repoParameters update.Repository
 
-                // invariant: an existing bot branch matches the last recorded head before PaketaBot creates objects or moves its ref
                 let! currentRef =
                     call
-                        installationId
                         "GET /repos/{owner}/{repo}/git/ref/{ref}"
                         (createObj (repo @ [ "ref" ==> $"heads/{update.Branch}" ]))
                     |> Async.Catch
@@ -87,8 +106,10 @@ type OctokitGateway(app: GitHubApp) =
                     | Choice2Of2 error when isNotFound error -> None
                     | Choice2Of2 error -> raise error
 
+                let expectedHead = update.PreviousPublication |> Option.map _.HeadSha
+
                 let publicationPlan =
-                    match Branches.planPublication update.BaseSha update.ExpectedHead currentHead with
+                    match Branches.planPublication update.BaseSha expectedHead currentHead with
                     | Ok plan -> plan
                     | Error message -> invalidOp message
 
@@ -99,7 +120,6 @@ type OctokitGateway(app: GitHubApp) =
 
                 let! blob =
                     call
-                        installationId
                         "POST /repos/{owner}/{repo}/git/blobs"
                         (createObj (repo @ [ "content" ==> toBase64 update.Content; "encoding" ==> "base64" ]))
 
@@ -115,7 +135,6 @@ type OctokitGateway(app: GitHubApp) =
 
                 let! tree =
                     call
-                        installationId
                         "POST /repos/{owner}/{repo}/git/trees"
                         (createObj (repo @ [ "base_tree" ==> update.BaseSha; "tree" ==> [| treeItem |] ]))
 
@@ -123,7 +142,6 @@ type OctokitGateway(app: GitHubApp) =
 
                 let! commit =
                     call
-                        installationId
                         "POST /repos/{owner}/{repo}/git/commits"
                         (createObj (
                             repo
@@ -140,7 +158,6 @@ type OctokitGateway(app: GitHubApp) =
                 | Branches.FastForwardFrom _ ->
                     let! _ =
                         call
-                            installationId
                             "PATCH /repos/{owner}/{repo}/git/refs/{ref}"
                             (createObj (
                                 repo
@@ -151,37 +168,26 @@ type OctokitGateway(app: GitHubApp) =
                 | Branches.CreateFrom _ ->
                     let! _ =
                         call
-                            installationId
                             "POST /repos/{owner}/{repo}/git/refs"
                             (createObj (repo @ [ "ref" ==> $"refs/heads/{update.Branch}"; "sha" ==> commitSha ]))
 
                     ()
 
-                let! pulls =
-                    call
-                        installationId
-                        "GET /repos/{owner}/{repo}/pulls"
-                        (createObj (
-                            repo
-                            @ [ "state" ==> "open"; "head" ==> $"{update.Repository.Owner}:{update.Branch}" ]
-                        ))
-
-                let existing: obj array = unbox (GitHubValues.data pulls)
+                let! existing = findPull update.Repository "open"
 
                 let! pull =
-                    if existing.Length > 0 then
-                        let number: int = existing[0]?number
+                    match existing with
+                    | Some value ->
+                        let number: int = value?number
 
                         call
-                            installationId
                             "PATCH /repos/{owner}/{repo}/pulls/{pull_number}"
                             (createObj (
                                 repo
                                 @ [ "pull_number" ==> number; "title" ==> update.Title; "body" ==> update.Body ]
                             ))
-                    else
+                    | None ->
                         call
-                            installationId
                             "POST /repos/{owner}/{repo}/pulls"
                             (createObj (
                                 repo
@@ -201,54 +207,3 @@ type OctokitGateway(app: GitHubApp) =
                     HeadSha = commitSha
                 }
             }
-
-        member _.Comment(repository, pullRequest, body) =
-            async {
-                let! _ =
-                    call
-                        repository.InstallationId
-                        "POST /repos/{owner}/{repo}/issues/{issue_number}/comments"
-                        (createObj (repoParameters repository @ [ "issue_number" ==> pullRequest; "body" ==> body ]))
-
-                return ()
-            }
-
-type FakeGitHubGateway() =
-    let mutable archive = [||]
-    let mutable head = String.replicate 40 "a"
-    let mutable permission = Admin
-    let mutable publicationNumber = 0
-    let publications = ResizeArray<PublishUpdate>()
-
-    member _.Archive
-        with get () = archive
-        and set value = archive <- value
-
-    member _.Head
-        with get () = head
-        and set value = head <- value
-
-    member _.Permission
-        with get () = permission
-        and set value = permission <- value
-
-    member _.Publications = publications |> Seq.toList
-
-    interface IGitHubGateway with
-        member _.GetDefaultHead _ = async { return head }
-        member _.DownloadArchive(_, _) = async { return archive }
-        member _.GetPermission(_, _) = async { return permission }
-
-        member _.Publish update =
-            async {
-                publications.Add update
-                publicationNumber <- max 1 publicationNumber
-
-                return {
-                    Branch = update.Branch
-                    PullRequestNumber = publicationNumber
-                    HeadSha = String.replicate 40 "b"
-                }
-            }
-
-        member _.Comment(_, _, _) = async { return () }

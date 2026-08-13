@@ -2,33 +2,14 @@ namespace PaketaBot
 
 open System
 
-type InstallationId = string
-type RepositoryId = string
-
 type Repository = {
-    Id: RepositoryId
-    InstallationId: InstallationId
     Owner: string
     Name: string
     DefaultBranch: string
-    Enabled: bool
 }
 
 module Repository =
     let fullName repository = $"{repository.Owner}/{repository.Name}"
-
-type RunTrigger =
-    | Scheduled
-    | RequestedBy of login: string
-
-type UpdateCommand =
-    | Update
-    | Rebase
-
-type UpdateJob = {
-    RepositoryId: RepositoryId
-    Trigger: RunTrigger
-}
 
 type VersionChange = {
     Name: string
@@ -40,7 +21,6 @@ type RunnerRequest = {
     Repository: string
     BaseSha: string
     ArtifactPath: string
-    OutputPath: string
 }
 
 type RunnerStatus =
@@ -65,7 +45,7 @@ type Publication = {
 type PublishUpdate = {
     Repository: Repository
     BaseSha: string
-    ExpectedHead: string option
+    PreviousPublication: Publication option
     Branch: string
     Path: string
     Content: string
@@ -74,46 +54,46 @@ type PublishUpdate = {
 }
 
 type UpdateOutcome =
-    | Skipped of reason: string
     | Published of Publication
     | Unchanged
     | RunFailed of messages: string list
 
-module UpdateOutcome =
-    let completionError =
-        function
-        | RunFailed [] -> Some "dependency update failed without details"
-        | RunFailed messages -> Some(String.concat "\n" messages)
-        | _ -> None
+module PullRequests =
+    [<Literal>]
+    let Marker = "<!-- paketabot:weekly -->"
 
-type RepositoryPermission =
-    | NoAccess
-    | Read
-    | Triage
-    | Write
-    | Maintain
-    | Admin
+    let isTrackedBody (body: string) =
+        not (isNull body) && body.Contains(Marker, StringComparison.Ordinal)
 
-module RepositoryPermission =
-    let canRequestUpdate =
-        function
-        | Write
-        | Maintain
-        | Admin -> true
-        | _ -> false
-
-module Commands =
-    let tryParse (body: string) =
-        match body.Trim().ToLowerInvariant() with
-        | "/paketabot update" -> Some Update
-        | "/paketabot rebase" -> Some Rebase
-        | _ -> None
-
-    /// Confirm that a webhook represents a newly-created command candidate.
+    /// Confirm that publication state belongs to the identity behind the configured token.
     ///
-    /// decision: ignores edited and deleted comments so changing webhook history cannot replay a command
-    let isCreatedComment action =
-        String.Equals(action, "created", StringComparison.Ordinal)
+    /// decision: combines an exact publisher identity with the marker so arbitrary marked pull requests cannot claim a branch
+    /// invariant: a pull request created by another GitHub identity never proves PaketaBot ownership
+    let isOwnedBy expectedAuthor actualAuthor body =
+        String.Equals(expectedAuthor, actualAuthor, StringComparison.OrdinalIgnoreCase)
+        && isTrackedBody body
+
+module PaketFiles =
+    [<Literal>]
+    let Lock = "paket.lock"
+
+    let isLock path =
+        String.Equals(path, Lock, StringComparison.Ordinal)
+
+module Checkouts =
+    /// Require Action execution to use the event's exact default-branch revision.
+    ///
+    /// decision: rejects non-default manual-dispatch refs so the pull request tree always derives from its declared base branch
+    /// invariant: the archived checkout SHA equals GITHUB_SHA and GITHUB_REF names the repository default branch
+    let validate defaultBranch eventRef eventSha checkoutSha =
+        let expectedRef = $"refs/heads/{defaultBranch}"
+
+        if not (String.Equals(eventRef, expectedRef, StringComparison.Ordinal)) then
+            Error $"PaketaBot must run from the default branch ({expectedRef})"
+        elif not (String.Equals(eventSha, checkoutSha, StringComparison.Ordinal)) then
+            Error "the checked-out commit does not match GITHUB_SHA"
+        else
+            Ok()
 
 module Branches =
     [<Literal>]

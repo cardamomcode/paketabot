@@ -65,9 +65,9 @@ module Eligibility =
         else
             None
 
-    /// Validate the deliberately narrow public-service policy for Paket inputs.
+    /// Validate the deliberately narrow credential-free runner policy for Paket inputs.
     ///
-    /// decision: v1 accepts only HTTPS NuGet.org sources so workers never receive tenant credentials
+    /// decision: v1 accepts only HTTPS NuGet.org sources so the runner never needs package-source credentials
     /// invariant: every non-comment source directive resolves to a public NuGet.org host without user information
     let inspect (dependencies: string) =
         let lines =

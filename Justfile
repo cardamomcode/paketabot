@@ -12,6 +12,9 @@ clean:
 build:
     pnpm build
 
+bundle:
+    pnpm bundle
+
 dev:
     pnpm dev
 
@@ -23,10 +26,3 @@ check:
 
 format:
     dotnet fantomas src test
-
-db-up:
-    podman compose up -d postgres
-
-db-down:
-    podman compose down
-

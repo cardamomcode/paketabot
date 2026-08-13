@@ -69,19 +69,65 @@ let private lockDiffTests =
         ]
     )
 
-let private commandTests =
+let private pullRequestTests =
     testList (
-        "commands",
+        "pull request tracking",
         [
             test (
-                "parses update",
-                fun _ -> assertThat (Commands.tryParse " /PaketaBot UPDATE ") (isEqualTo (Some Update))
+                "recognizes the PaketaBot marker",
+                fun _ -> assertThat (PullRequests.isTrackedBody $"{PullRequests.Marker}\nupdate") isTrue
             )
-            test ("ignores conversation", fun _ -> assertThat (Commands.tryParse "please update") (isEqualTo None))
-            test ("accepts newly-created comments", fun _ -> assertThat (Commands.isCreatedComment "created") isTrue)
-            test ("ignores edited comments", fun _ -> assertThat (Commands.isCreatedComment "edited") isFalse)
-            test ("requires write access", fun _ -> assertThat (RepositoryPermission.canRequestUpdate Write) isTrue)
-            test ("rejects triage access", fun _ -> assertThat (RepositoryPermission.canRequestUpdate Triage) isFalse)
+            test (
+                "requires the authenticated publisher identity",
+                fun _ ->
+                    assertThat (PullRequests.isOwnedBy "paketabot" "PaketaBot" $"{PullRequests.Marker}\nupdate") isTrue
+            )
+            test (
+                "rejects a marker from another identity",
+                fun _ ->
+                    assertThat
+                        (PullRequests.isOwnedBy "paketabot" "maintainer" $"{PullRequests.Marker}\nupdate")
+                        isFalse
+            )
+            test (
+                "rejects ordinary pull request bodies",
+                fun _ -> assertThat (PullRequests.isTrackedBody "update") isFalse
+            )
+            test ("rejects missing pull request bodies", fun _ -> assertThat (PullRequests.isTrackedBody null) isFalse)
+        ]
+    )
+
+let private checkoutTests =
+    testList (
+        "checkout validation",
+        [
+            test (
+                "accepts the exact default-branch event revision",
+                fun _ -> assertThat (Checkouts.validate "main" "refs/heads/main" "abc" "abc") (isEqualTo (Ok()))
+            )
+            test (
+                "rejects a manual run from another branch",
+                fun _ ->
+                    assertThat
+                        (Checkouts.validate "main" "refs/heads/feature" "abc" "abc")
+                        (isEqualTo (Error "PaketaBot must run from the default branch (refs/heads/main)"))
+            )
+            test (
+                "rejects a checkout that differs from the event revision",
+                fun _ ->
+                    assertThat
+                        (Checkouts.validate "main" "refs/heads/main" "abc" "def")
+                        (isEqualTo (Error "the checked-out commit does not match GITHUB_SHA"))
+            )
+        ]
+    )
+
+let private publicationPathTests =
+    testList (
+        "publication path",
+        [
+            test ("accepts only the root lock file", fun _ -> assertThat (PaketFiles.isLock "paket.lock") isTrue)
+            test ("rejects another path", fun _ -> assertThat (PaketFiles.isLock "src/paket.lock") isFalse)
         ]
     )
 
@@ -118,23 +164,15 @@ let private branchTests =
         ]
     )
 
-let private completionTests =
+let tests =
     testList (
-        "job completion",
+        "core",
         [
-            test (
-                "surfaces workflow failures to the queue",
-                fun _ ->
-                    assertThat
-                        (UpdateOutcome.completionError (RunFailed [ "download failed"; "retry later" ]))
-                        (isEqualTo (Some "download failed\nretry later"))
-            )
-            test (
-                "completes terminal non-failure outcomes",
-                fun _ -> assertThat (UpdateOutcome.completionError Unchanged) (isEqualTo None)
-            )
+            eligibilityTests
+            lockDiffTests
+            pullRequestTests
+            checkoutTests
+            publicationPathTests
+            branchTests
         ]
     )
-
-let tests =
-    testList ("core", [ eligibilityTests; lockDiffTests; commandTests; branchTests; completionTests ])

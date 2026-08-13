@@ -7,105 +7,87 @@ open PaketaBot
 open PaketaBot.App
 open PaketaBot.App.Bindings
 
-let private envOr name fallback =
-    let value = env name
-    if String.IsNullOrWhiteSpace(value) then fallback else value
-
-let private requireEnv name =
-    let value = env name
+let private requiredInput name =
+    let value = getInput name
 
     if String.IsNullOrWhiteSpace(value) then
-        invalidOp $"{name} must be set"
+        invalidOp $"the {name} input is required"
 
     value
 
-let private createGateway () : IGitHubGateway =
-    let appId = env "GITHUB_APP_ID"
-    let privateKey = env "GITHUB_APP_PRIVATE_KEY"
+let private requiredEnvironment name =
+    let value = env name
 
-    match String.IsNullOrWhiteSpace(appId), String.IsNullOrWhiteSpace(privateKey) with
-    | true, true -> FakeGitHubGateway() :> IGitHubGateway
-    | false, false -> GitHubApp(AppOptions(appId, privateKey.Replace("\\n", "\n"))) |> OctokitGateway :> IGitHubGateway
-    | _ -> invalidOp "GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY must be configured together"
+    if String.IsNullOrWhiteSpace(value) then
+        invalidOp $"{name} must be set by GitHub Actions"
 
-let private createRunner () : ISandboxRunner =
-    let image = env "PAKETABOT_RUNNER_IMAGE"
+    value
 
-    if String.IsNullOrWhiteSpace(image) then
-        NoopRunner() :> ISandboxRunner
-    else
-        ContainerRunner(envOr "PAKETABOT_CONTAINER_RUNTIME" "podman", image) :> ISandboxRunner
+let private repositoryParts (value: string) =
+    match value.Split('/') with
+    | [| owner; name |] when not (String.IsNullOrWhiteSpace(owner) || String.IsNullOrWhiteSpace(name)) -> owner, name
+    | _ -> invalidOp "GITHUB_REPOSITORY must have the form owner/name"
+
+let private actionRoot () =
+    moduleUrl |> fileUrlToPath |> dirname |> dirname
 
 let private start () =
     async {
-        let databaseUrl = env "DATABASE_URL"
+        try
+            let token = requiredInput "token"
+            setSecret token
 
-        // decision: refuses an implicit webhook secret because a known fallback would authenticate forged events
-        // invariant: the HTTP server never starts without an explicitly configured webhook secret
-        let webhookSecret = requireEnv "GITHUB_WEBHOOK_SECRET"
-        let github = createGateway ()
+            let workspace = requiredEnvironment "GITHUB_WORKSPACE"
+            let owner, name = requiredEnvironment "GITHUB_REPOSITORY" |> repositoryParts
+            let runtime = requiredInput "container-runtime"
+            let configuredImage = getInput "runner-image"
+            let github = OctokitGateway(token) :> IGitHubGateway
+            let! repository = github.GetRepository(owner, name)
 
-        let artifacts =
-            LocalArtifactStore(envOr "PAKETABOT_ARTIFACT_ROOT" (join [| tempDirectory (); "paketabot-artifacts" |]))
+            let gitOptions =
+                createObj [ "cwd" ==> workspace; "timeout" ==> 30_000; "maxBuffer" ==> 1_048_576 ]
 
-        let runner = createRunner ()
+            let! (stdout: string), _ = execFile "git" [| "rev-parse"; "HEAD" |] gitOptions |> Async.AwaitPromise
+            let baseSha = stdout.Trim()
 
-        let! store, queue, stopInfrastructure =
-            async {
-                if String.IsNullOrWhiteSpace(databaseUrl) then
-                    let store = MemoryRepositoryStore() :> IRepositoryStore
-                    let service = UpdateService(store, github, artifacts, runner)
-                    let queue = MemoryJobQueue(fun job -> service.Run job |> Async.Ignore) :> IJobQueue
-                    return store, queue, async { return () }
-                else
-                    let pool = Pool(PoolOptions(databaseUrl))
-                    let postgresStore = PostgresRepositoryStore(pool)
-                    do! postgresStore.Migrate()
-                    let store = postgresStore :> IRepositoryStore
-                    let boss = PgBoss(databaseUrl)
-                    let! _ = boss.start () |> Async.AwaitPromise
-                    do! PgBossWorkers.initialize boss
-                    let queue = PgBossJobQueue(boss) :> IJobQueue
-                    let service = UpdateService(store, github, artifacts, runner)
-                    let! _ = PgBossWorkers.start boss service |> Async.AwaitPromise
-                    let! _ = PgBossWorkers.startScheduler boss store queue |> Async.AwaitPromise
-                    do! PgBossWorkers.scheduleWeekly boss |> Async.AwaitPromise
+            match
+                Checkouts.validate
+                    repository.DefaultBranch
+                    (requiredEnvironment "GITHUB_REF")
+                    (requiredEnvironment "GITHUB_SHA")
+                    baseSha
+            with
+            | Ok() -> ()
+            | Error message -> invalidOp message
 
-                    let stop =
-                        async {
-                            do! boss.stop () |> Async.AwaitPromise
-                            do! pool.``end`` () |> Async.AwaitPromise
-                        }
+            let artifactRoot =
+                join [| requiredEnvironment "RUNNER_TEMP"; "paketabot-artifacts" |]
 
-                    return store, queue, stop
-            }
+            let artifacts = GitArtifactStore(workspace, artifactRoot) :> IArtifactStore
+            let! image = RunnerImage.resolve runtime configuredImage (actionRoot ())
+            let runner = ContainerRunner(runtime, image) :> ISandboxRunner
+            let service = UpdateService(github, artifacts, runner)
+            let! outcome = service.Run(repository, baseSha)
 
-        let server =
-            Server.create {
-                Store = store
-                GitHub = github
-                Queue = queue
-                Webhooks = Webhooks(WebhookOptions(webhookSecret))
-            }
+            match outcome with
+            | Unchanged ->
+                info "Paket dependencies are already current."
+                setOutput "outcome" "unchanged"
+            | Published publication ->
+                info $"Published pull request #{publication.PullRequestNumber}."
+                setOutput "outcome" "published"
+                setOutput "pull-request-number" publication.PullRequestNumber
+            | RunFailed messages ->
+                let message =
+                    match messages with
+                    | [] -> "PaketaBot failed without details."
+                    | values -> String.concat "\n" values
 
-        let stop () =
-            async {
-                do! server.close () |> Async.AwaitPromise
-                do! stopInfrastructure
-            }
-            |> Async.StartAsPromise
-            |> ignore
-
-        onProcessEvent "SIGTERM" stop
-        onProcessEvent "SIGINT" stop
-
-        let port = envOr "PORT" "3000" |> int
-
-        let! address =
-            server.listen (createObj [ "host" ==> "0.0.0.0"; "port" ==> port ])
-            |> Async.AwaitPromise
-
-        log $"PaketaBot listening at {address}"
+                setOutput "outcome" "failed"
+                setFailed message
+        with ex ->
+            setOutput "outcome" "failed"
+            setFailed ex.Message
     }
 
 [<EntryPoint>]

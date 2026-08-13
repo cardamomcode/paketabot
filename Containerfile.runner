@@ -13,7 +13,7 @@ RUN apt-get update \
 
 ENV PATH="/opt/paket:${PATH}"
 WORKDIR /app
-COPY build/js/runner/ ./
+COPY dist/runner.mjs ./runner.mjs
 
 USER node
-ENTRYPOINT ["node", "/app/Program.js"]
+ENTRYPOINT ["node", "/app/runner.mjs"]

@@ -1,0 +1,28 @@
+name: PaketaBot
+description: Update Paket dependencies and refresh one guarded pull request.
+
+inputs:
+  token:
+    description: Token used only by the host publisher to create the branch and pull request.
+    required: true
+  container-runtime:
+    description: OCI runtime used for the credential-free Paket runner.
+    required: false
+    default: docker
+  runner-image:
+    description: Optional prebuilt runner image; the bundled image is built when omitted.
+    required: false
+
+outputs:
+  outcome:
+    description: One of published, unchanged, or failed.
+  pull-request-number:
+    description: Pull request number when outcome is published.
+
+runs:
+  using: node24
+  main: dist/index.js
+
+branding:
+  icon: package
+  color: blue

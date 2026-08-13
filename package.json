@@ -9,27 +9,23 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "dotnet fable src/PaketaBot.App/PaketaBot.App.fsproj --lang typescript --outDir build/ts/app && dotnet fable src/PaketaBot.Runner/PaketaBot.Runner.fsproj --lang typescript --outDir build/ts/runner && tsc -p tsconfig.json",
-    "build:test": "dotnet fable test/PaketaBot.Tests/PaketaBot.Tests.fsproj --lang typescript --outDir build/ts/test && tsc -p tsconfig.test.json",
-    "check": "dotnet build PaketaBot.slnx && pnpm build && pnpm build:test",
+    "build": "pnpm clean && dotnet fable src/PaketaBot.App/PaketaBot.App.fsproj --lang typescript --outDir build/ts/app && dotnet fable src/PaketaBot.Runner/PaketaBot.Runner.fsproj --lang typescript --outDir build/ts/runner && tsc -p tsconfig.json",
+    "build:test": "node -e \"require('node:fs').rmSync('build/ts/test',{recursive:true,force:true});require('node:fs').rmSync('build/js/test',{recursive:true,force:true})\" && dotnet fable test/PaketaBot.Tests/PaketaBot.Tests.fsproj --lang typescript --outDir build/ts/test && tsc -p tsconfig.test.json",
+    "bundle": "pnpm build && rollup --config rollup.config.mjs",
+    "check": "dotnet build PaketaBot.slnx && pnpm bundle && pnpm build:test",
     "clean": "node -e \"require('node:fs').rmSync('build',{recursive:true,force:true})\"",
     "dev": "dotnet fable watch src/PaketaBot.App/PaketaBot.App.fsproj --lang typescript --outDir build/ts/app --runWatch pnpm exec tsc -p tsconfig.json",
-    "start": "node build/js/app/Program.js",
-    "test": "pnpm build:test && node build/js/test/Main.js",
-    "test:integration": "PAKETABOT_INTEGRATION=true pnpm test"
+    "test": "pnpm build:test && node build/js/test/Main.js"
   },
   "dependencies": {
-    "@octokit/app": "16.1.4",
-    "@octokit/webhooks": "14.2.0",
-    "fastify": "5.11.3",
-    "pg": "8.23.0",
-    "pg-boss": "12.27.0",
-    "zod": "4.4.3"
+    "@actions/core": "3.0.1",
+    "@actions/github": "9.1.1"
   },
   "devDependencies": {
+    "@rollup/plugin-commonjs": "29.0.3",
+    "@rollup/plugin-node-resolve": "16.0.3",
     "@types/node": "24.13.3",
-    "@types/pg": "8.21.0",
-    "concurrently": "10.0.4",
+    "rollup": "4.62.4",
     "typescript": "7.0.2"
   }
 }
