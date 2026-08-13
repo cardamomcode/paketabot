@@ -22,6 +22,7 @@ type PaketResolver(workspace: string, executable: string, isolatedHome: string) 
                         Status = Rejected
                         LockFile = None
                         Changes = []
+                        RequirementChanges = []
                         Messages = reasons
                     }
                 | Eligible ->
@@ -58,6 +59,7 @@ type PaketResolver(workspace: string, executable: string, isolatedHome: string) 
                             Status = NoChange
                             LockFile = None
                             Changes = []
+                            RequirementChanges = []
                             Messages = []
                         }
                     else
@@ -65,6 +67,7 @@ type PaketResolver(workspace: string, executable: string, isolatedHome: string) 
                             Status = Updated
                             LockFile = Some current
                             Changes = LockDiff.changes previous current
+                            RequirementChanges = LockDiff.requirementChanges previous current
                             Messages =
                                 if String.IsNullOrWhiteSpace(stderr) then
                                     []

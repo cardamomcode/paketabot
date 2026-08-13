@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   update:
-    uses: dbrattli/paketabot/.github/workflows/paketabot.yml@v0.1.0
+    uses: dbrattli/paketabot/.github/workflows/paketabot.yml@v0.1.1
     permissions:
       contents: read
     secrets:

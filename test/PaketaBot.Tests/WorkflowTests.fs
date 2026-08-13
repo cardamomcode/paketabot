@@ -135,6 +135,7 @@ let private updatedResult = {
             Current = "5.2.0"
         }
     ]
+    RequirementChanges = []
     Messages = []
 }
 
@@ -203,6 +204,7 @@ let private publishTests =
                             Status = NoChange
                             LockFile = None
                             Changes = []
+                            RequirementChanges = []
                             Messages = []
                         }
 
@@ -222,6 +224,7 @@ let private publishTests =
                             Status = Failed
                             LockFile = None
                             Changes = []
+                            RequirementChanges = []
                             Messages = [ "resolver timed out" ]
                         }
 

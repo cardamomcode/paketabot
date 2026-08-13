@@ -37,7 +37,7 @@ reusable workflow and passes only the named secret:
 ```yaml
 jobs:
   update:
-    uses: dbrattli/paketabot/.github/workflows/paketabot.yml@v0.1.0
+    uses: dbrattli/paketabot/.github/workflows/paketabot.yml@v0.1.1
     permissions:
       contents: read
     secrets:
@@ -48,9 +48,9 @@ The action repository is private during development. To test it from another
 private repository owned by the same account, grant repository Actions access
 under **Settings → Actions → General → Access**. Consumers use the exact
 immutable release shown above; do not reference `main` or a movable major tag.
-`v0.1.0` is the private preview used to exercise the complete release artifact.
-The production `v1.0.0` release remains reserved until every public-release
-requirement in the threat model is satisfied.
+`v0.1.1` is the current private preview; `v0.1.0` remains its immutable initial
+smoke-tested release. The production `v1.0.0` release remains reserved until
+every public-release requirement in the threat model is satisfied.
 
 The example runs weekly and supports manual runs through `workflow_dispatch`.
 GitHub Actions concurrency prevents overlapping runs. PaketaBot refreshes only

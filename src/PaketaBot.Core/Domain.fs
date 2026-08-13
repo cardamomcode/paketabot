@@ -17,6 +17,13 @@ type VersionChange = {
     Current: string
 }
 
+type RequirementChange = {
+    Name: string
+    RequiredBy: string
+    Previous: string
+    Current: string
+}
+
 type ResolutionStatus =
     | NoChange
     | Updated
@@ -27,6 +34,7 @@ type ResolutionResult = {
     Status: ResolutionStatus
     LockFile: string option
     Changes: VersionChange list
+    RequirementChanges: RequirementChange list
     Messages: string list
 }
 
