@@ -37,16 +37,17 @@ reusable workflow and passes only the named secret:
 ```yaml
 jobs:
   update:
-    uses: dbrattli/paketabot/.github/workflows/paketabot.yml@main
+    uses: dbrattli/paketabot/.github/workflows/paketabot.yml@v1.0.0
     permissions:
       contents: read
     secrets:
       paketabot_token: ${{ secrets.PAKETABOT_TOKEN }}
 ```
 
-The action repository is private during development, so GitHub repository
-settings must allow the consuming repository to access it. Published versions
-will use an immutable release reference instead of `main`.
+The action repository is private during development. To test it from another
+private repository owned by the same account, grant repository Actions access
+under **Settings → Actions → General → Access**. Consumers use the exact
+immutable release shown above; do not reference `main` or a movable major tag.
 
 The example runs weekly and supports manual runs through `workflow_dispatch`.
 GitHub Actions concurrency prevents overlapping runs. PaketaBot refreshes only
@@ -98,7 +99,8 @@ under `dist/` are generated artifacts and must not be edited manually.
 
 See [Architecture](docs/architecture.md) and the
 [Threat model](docs/threat-model.md) for the trust boundary and remaining
-release work.
+release work. Maintainers should also follow the
+[release procedure](docs/releasing.md).
 
 PaketaBot adopts [Agent Decision Comments](https://github.com/dbrattli/adc).
 The pinned local convention is in `AGENT_DECISION_COMMENTS.md`.

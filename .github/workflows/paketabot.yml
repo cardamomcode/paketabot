@@ -18,23 +18,26 @@ jobs:
     outputs:
       outcome: ${{ steps.resolve.outputs.outcome }}
     steps:
-      - uses: actions/checkout@v7
+      # decision: pins third-party Actions to reviewed commits so mutable upstream tags cannot change privileged workflows
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           dotnet-version: 10.0.400
       - name: Install Paket
         run: dotnet tool install --tool-path "$RUNNER_TEMP/paket" Paket --version 10.3.1
       - name: Resolve dependencies without publisher credentials
         id: resolve
-        uses: dbrattli/paketabot@main
+        # decision: uses the release-specific immutable tag so this workflow invokes Action code from the same review
+        # invariant: both operation steps in a released workflow reference that workflow's exact release tag
+        uses: dbrattli/paketabot@v1.0.0
         with:
           operation: resolve
           paket-path: ${{ runner.temp }}/paket/paket
           result-path: ${{ runner.temp }}/paketabot/result.json
       - name: Upload typed resolution
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: paketabot-resolution
           path: ${{ runner.temp }}/paketabot/result.json
@@ -48,12 +51,13 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: paketabot-resolution
           path: ${{ runner.temp }}/paketabot
       - name: Publish guarded dependency update
-        uses: dbrattli/paketabot@main
+        # Keep synchronized with the resolve operation's immutable self-reference.
+        uses: dbrattli/paketabot@v1.0.0
         with:
           operation: publish
           token: ${{ secrets.paketabot_token }}

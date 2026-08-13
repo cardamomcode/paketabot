@@ -34,6 +34,11 @@ The Fable output is validated with `tsc` and bundled with Rollup. Intermediate
 output under `build/` is ignored; GitHub's required self-contained Action bundle
 under `dist/` is generated and committed.
 
+Published reusable workflows call the bundled Action through their own exact,
+immutable release tag. Third-party Actions are pinned to full commit SHAs. This
+keeps every job definition and executable dependency attached to commits that
+were reviewed for that release.
+
 ## Update lifecycle
 
 1. A repository-local schedule or manual dispatch calls the reusable workflow.
