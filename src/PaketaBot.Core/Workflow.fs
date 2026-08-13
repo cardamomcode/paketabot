@@ -1,9 +1,16 @@
 namespace PaketaBot
 
+open System
+
 type IGitHubGateway =
     abstract GetRepository: owner: string * name: string -> Async<Repository>
     abstract TryGetPublication: Repository -> Async<Publication option>
-    abstract Publish: PublishUpdate -> Async<Publication>
+    abstract GetBranchHead: repository: Repository * branch: string -> Async<string option>
+    abstract CreateCommit: update: PublishUpdate * parentSha: string -> Async<string>
+    abstract CreateBranch: repository: Repository * branch: string * commitSha: string -> Async<unit>
+    abstract FastForwardBranch: repository: Repository * branch: string * commitSha: string -> Async<unit>
+    abstract CreatePullRequest: update: PublishUpdate -> Async<int>
+    abstract UpdatePullRequest: update: PublishUpdate * pullRequestNumber: int -> Async<unit>
 
 type IPaketResolver =
     abstract Resolve: unit -> Async<ResolutionResult>
@@ -43,10 +50,37 @@ type ResolveService(resolver: IPaketResolver) =
         }
 
 type PublishService(github: IGitHubGateway) =
+    let publication branch pullRequestNumber headSha = {
+        Branch = branch
+        PullRequestNumber = pullRequestNumber
+        HeadSha = headSha
+        IsOpen = true
+    }
+
+    let createPullRequestAfterBranchMutation update commitSha =
+        async {
+            try
+                let! pullRequestNumber = github.CreatePullRequest update
+                return publication update.Branch pullRequestNumber commitSha
+            with ex ->
+                return
+                    raise (
+                        Exception(
+                            $"GitHub did not confirm a pull request after updating {update.Branch}. "
+                            + "Rerun PaketaBot first; if no owned pull request exists, follow PaketaBot's recovery procedure. "
+                            + ex.Message,
+                            ex
+                        )
+                    )
+        }
+
     /// Publish one typed dependency resolution from the credential-free job.
     ///
     /// decision: uses the marked pull request as durable publication state because the Action has no database
     /// invariant: only a successful resolution containing paket.lock can reach the GitHub publisher
+    /// decision: updates an open pull request before its branch so the ref update is the final fallible GitHub mutation
+    /// invariant: refreshing an open owned pull request performs no GitHub API call after moving its branch
+    /// tradeoff: creating a pull request still requires a branch first, so uncertain failures need fail-closed human recovery
     member _.Run(repository: Repository, baseSha: string, result: ResolutionResult) =
         async {
             try
@@ -54,11 +88,11 @@ type PublishService(github: IGitHubGateway) =
                 | NoChange, _ -> return Unchanged
                 | Updated, Some lockFile ->
                     let! previousPublication = github.TryGetPublication repository
+                    let! currentHead = github.GetBranchHead(repository, Branches.Weekly)
 
                     let publish = {
                         Repository = repository
                         BaseSha = baseSha
-                        PreviousPublication = previousPublication
                         Branch = Branches.Weekly
                         Path = PaketFiles.Lock
                         Content = lockFile
@@ -66,8 +100,36 @@ type PublishService(github: IGitHubGateway) =
                         Body = PullRequestBody.render result.Changes
                     }
 
-                    let! publication = github.Publish publish
-                    return Published publication
+                    let expectedHead = previousPublication |> Option.map _.HeadSha
+
+                    let publicationPlan =
+                        match Branches.planPublication baseSha expectedHead currentHead with
+                        | Ok plan -> plan
+                        | Error message -> invalidOp message
+
+                    let parentSha =
+                        match publicationPlan with
+                        | Branches.CreateFrom sha -> sha
+                        | Branches.FastForwardFrom sha -> sha
+
+                    let! commitSha = github.CreateCommit(publish, parentSha)
+
+                    match publicationPlan, previousPublication with
+                    | Branches.FastForwardFrom _, Some previous when previous.IsOpen ->
+                        do! github.UpdatePullRequest(publish, previous.PullRequestNumber)
+                        do! github.FastForwardBranch(repository, publish.Branch, commitSha)
+
+                        return Published(publication publish.Branch previous.PullRequestNumber commitSha)
+                    | Branches.FastForwardFrom _, Some _ ->
+                        do! github.FastForwardBranch(repository, publish.Branch, commitSha)
+                        let! value = createPullRequestAfterBranchMutation publish commitSha
+                        return Published value
+                    | Branches.CreateFrom _, _ ->
+                        do! github.CreateBranch(repository, publish.Branch, commitSha)
+                        let! value = createPullRequestAfterBranchMutation publish commitSha
+                        return Published value
+                    | Branches.FastForwardFrom _, None ->
+                        return invalidOp "a verified branch head requires tracked publication state"
                 | _ -> return RunFailed result.Messages
             with ex ->
                 return RunFailed [ ex.Message ]

@@ -48,7 +48,9 @@ satisfied.
    Paket project. Confirm the resolver has no publisher token, the publisher
    changes only `paketabot/weekly`, and the pull request contains only
    `paket.lock`.
-4. Record any failure without moving or deleting the published tag. Correct it
+4. Exercise the retry and fail-closed cases described in the
+   [recovery procedure](recovery.md).
+5. Record any failure without moving or deleting the published tag. Correct it
    in a new patch release.
 
 While the repository is private, explicitly grant Actions access to intended

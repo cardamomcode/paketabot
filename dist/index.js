@@ -35073,27 +35073,27 @@ class Publication extends Record {
     Branch;
     PullRequestNumber;
     HeadSha;
-    constructor(Branch, PullRequestNumber, HeadSha) {
+    IsOpen;
+    constructor(Branch, PullRequestNumber, HeadSha, IsOpen) {
         super();
         this.Branch = Branch;
         this.PullRequestNumber = (PullRequestNumber | 0);
         this.HeadSha = HeadSha;
+        this.IsOpen = IsOpen;
     }
 }
 class PublishUpdate extends Record {
     Repository;
     BaseSha;
-    PreviousPublication;
     Branch;
     Path;
     Content;
     Title;
     Body;
-    constructor(Repository, BaseSha, PreviousPublication, Branch, Path, Content, Title, Body) {
+    constructor(Repository, BaseSha, Branch, Path, Content, Title, Body) {
         super();
         this.Repository = Repository;
         this.BaseSha = BaseSha;
-        this.PreviousPublication = PreviousPublication;
         this.Branch = Branch;
         this.Path = Path;
         this.Content = Content;
@@ -36934,6 +36934,9 @@ function PublishService_$ctor_1622FD4C(github) {
  *
  * decision: uses the marked pull request as durable publication state because the Action has no database
  * invariant: only a successful resolution containing paket.lock can reach the GitHub publisher
+ * decision: updates an open pull request before its branch so the ref update is the final fallible GitHub mutation
+ * invariant: refreshing an open owned pull request performs no GitHub API call after moving its branch
+ * tradeoff: creating a pull request still requires a branch first, so uncertain failures need fail-closed human recovery
  */
 function PublishService__Run_Z750F7FC2(_, repository, baseSha, result) {
     return singleton.Delay(() => singleton.TryWith(singleton.Delay(() => {
@@ -36963,14 +36966,44 @@ function PublishService__Run_Z750F7FC2(_, repository, baseSha, result) {
             case 1: {
                 const lockFile = value(matchValue_1);
                 return singleton.Bind(_.github.TryGetPublication(repository), (_arg) => {
-                    const publish = new PublishUpdate(repository, baseSha, _arg, "paketabot/weekly", "paket.lock", lockFile, "chore(deps): update Paket dependencies", PullRequestBody_render(result.Changes));
-                    return singleton.Bind(_.github.Publish(publish), (_arg_1) => singleton.Return(UpdateOutcome_Published(_arg_1)));
+                    const previousPublication = _arg;
+                    return singleton.Bind(_.github.GetBranchHead(repository, "paketabot/weekly"), (_arg_1) => {
+                        let option_1 = undefined;
+                        const publish = new PublishUpdate(repository, baseSha, "paketabot/weekly", "paket.lock", lockFile, "chore(deps): update Paket dependencies", PullRequestBody_render(result.Changes));
+                        let publicationPlan;
+                        const matchValue_3 = Branches_planPublication(baseSha, (option_1 = previousPublication, (option_1 != null) ? value(option_1).HeadSha : undefined), _arg_1);
+                        if (matchValue_3.tag === /* Error */ 1) {
+                            throw new Exception(matchValue_3.fields[0]);
+                        }
+                        else {
+                            publicationPlan = matchValue_3.fields[0];
+                        }
+                        const parentSha = (publicationPlan.tag === /* FastForwardFrom */ 1) ? publicationPlan.fields[0] : publicationPlan.fields[0];
+                        return singleton.Bind(_.github.CreateCommit(publish, parentSha), (_arg_3) => {
+                            let previous_1 = undefined;
+                            const commitSha = _arg_3;
+                            return (publicationPlan.tag === /* CreateFrom */ 0) ? singleton.Bind(_.github.CreateBranch(repository, publish.Branch, commitSha), () => singleton.Bind(PublishService__createPullRequestAfterBranchMutation(_, publish, commitSha), (_arg_9) => singleton.Return(UpdateOutcome_Published(_arg_9)))) : ((previousPublication == null) ? singleton.Return((() => {
+                                throw new Exception("a verified branch head requires tracked publication state");
+                            })()) : (value(previousPublication).IsOpen ? ((previous_1 = value(previousPublication), singleton.Bind(_.github.UpdatePullRequest(publish, previous_1.PullRequestNumber), () => singleton.Bind(_.github.FastForwardBranch(repository, publish.Branch, commitSha), () => singleton.Return(UpdateOutcome_Published(PublishService__publication(_, publish.Branch, previous_1.PullRequestNumber, commitSha))))))) : singleton.Bind(_.github.FastForwardBranch(repository, publish.Branch, commitSha), () => singleton.Bind(PublishService__createPullRequestAfterBranchMutation(_, publish, commitSha), (_arg_7) => singleton.Return(UpdateOutcome_Published(_arg_7))))));
+                        });
+                    });
                 });
             }
             default:
                 return singleton.Return(UpdateOutcome_RunFailed(result.Messages));
         }
-    }), (_arg_2) => singleton.Return(UpdateOutcome_RunFailed(singleton$1(_arg_2.message)))));
+    }), (_arg_10) => singleton.Return(UpdateOutcome_RunFailed(singleton$1(_arg_10.message)))));
+}
+function PublishService__publication(this$, branch, pullRequestNumber, headSha) {
+    return new Publication(branch, pullRequestNumber, headSha, true);
+}
+function PublishService__createPullRequestAfterBranchMutation(this$, update, commitSha) {
+    return singleton.Delay(() => singleton.TryWith(singleton.Delay(() => singleton.Bind(this$.github.CreatePullRequest(update), (_arg) => singleton.Return(PublishService__publication(this$, update.Branch, _arg, commitSha)))), (_arg_1) => {
+        const ex = _arg_1;
+        return singleton.Return((() => {
+            throw new Exception((concat$1("GitHub did not confirm a pull request after updating ", update.Branch, ". ") + "Rerun PaketaBot first; if no owned pull request exists, follow PaketaBot\'s recovery procedure. ") + ex.message, ex);
+        })());
+    }));
 }
 
 class Context {
@@ -42321,12 +42354,31 @@ class OctokitGateway {
     }
     TryGetPublication(repository) {
         const _ = this;
-        return singleton.Delay(() => singleton.Bind(OctokitGateway__findPull(_, repository, "all"), (_arg) => {
-            let option_1 = undefined, value$1 = undefined;
-            return singleton.Return((option_1 = _arg, (option_1 != null) ? ((value$1 = value(option_1), new Publication("paketabot/weekly", value$1.number, value$1.head.sha))) : undefined));
+        return singleton.Delay(() => singleton.Bind(OctokitGateway__findPull(_, repository, "open"), (_arg) => {
+            let value$1 = undefined;
+            const openPull = _arg;
+            return singleton.Bind((openPull == null) ? OctokitGateway__findPull(_, repository, "closed") : ((value$1 = value(openPull), singleton.Delay(() => singleton.Return(some(value$1))))), (_arg_1) => {
+                let option_1 = undefined, value_1 = undefined;
+                return singleton.Return((option_1 = _arg_1, (option_1 != null) ? ((value_1 = value(option_1), new Publication("paketabot/weekly", value_1.number, value_1.head.sha, toString$2(value_1.state) === "open"))) : undefined));
+            });
         }));
     }
-    Publish(update) {
+    GetBranchHead(repository, branch) {
+        const _ = this;
+        return singleton.Delay(() => singleton.Combine(!Branches_isOwned(branch) ? (((() => {
+            throw new Exception("PaketaBot can only inspect its owned weekly branch (Parameter \'branch\')");
+        })(), singleton.Zero())) : singleton.Zero(), singleton.Delay(() => {
+            const repo = OctokitGateway__repoParameters_Z212AD886(_, repository);
+            return singleton.Bind(catchAsync(OctokitGateway__call(_, "GET /repos/{owner}/{repo}/git/ref/{ref}", createObj(append(repo, singleton$1(["ref", concat$1("heads/", branch)]))))), (_arg) => {
+                let error = undefined, error_2 = undefined, response = undefined;
+                const currentRef = _arg;
+                return singleton.Return((currentRef.tag === /* Choice2Of2 */ 1) ? (((error = currentRef.fields[0], error?.status === 404 || error?.response?.status === 404)) ? ((currentRef.fields[0], undefined)) : ((error_2 = currentRef.fields[0], (() => {
+                    throw error_2;
+                })()))) : ((response = currentRef.fields[0], GitHubValues_data(response).object.sha)));
+            });
+        })));
+    }
+    CreateCommit(update, parentSha) {
         const _ = this;
         return singleton.Delay(() => singleton.Combine(!Branches_isOwned(update.Branch) ? (((() => {
             throw new Exception("PaketaBot can only publish its owned weekly branch (Parameter \'Branch\')");
@@ -42334,61 +42386,42 @@ class OctokitGateway {
             throw new Exception("PaketaBot can only publish paket.lock (Parameter \'Path\')");
         })(), singleton.Zero())) : singleton.Zero(), singleton.Delay(() => {
             const repo = OctokitGateway__repoParameters_Z212AD886(_, update.Repository);
-            return singleton.Bind(catchAsync(OctokitGateway__call(_, "GET /repos/{owner}/{repo}/git/ref/{ref}", createObj(append(repo, singleton$1(["ref", concat$1("heads/", update.Branch)]))))), (_arg) => {
-                let error = undefined, option_1 = undefined;
-                const currentRef = _arg;
-                let currentHead;
-                if (currentRef.tag === /* Choice2Of2 */ 1) {
-                    if ((error = currentRef.fields[0], error?.status === 404 || error?.response?.status === 404)) {
-                        currentRef.fields[0];
-                        currentHead = undefined;
-                    }
-                    else {
-                        const error_2 = currentRef.fields[0];
-                        throw error_2;
-                    }
-                }
-                else {
-                    const response = currentRef.fields[0];
-                    currentHead = GitHubValues_data(response).object.sha;
-                }
-                let publicationPlan;
-                const matchValue = Branches_planPublication(update.BaseSha, (option_1 = update.PreviousPublication, (option_1 != null) ? value(option_1).HeadSha : undefined), currentHead);
-                if (matchValue.tag === /* Error */ 1) {
-                    throw new Exception(matchValue.fields[0]);
-                }
-                else {
-                    publicationPlan = matchValue.fields[0];
-                }
-                const parentSha = (publicationPlan.tag === /* FastForwardFrom */ 1) ? publicationPlan.fields[0] : publicationPlan.fields[0];
-                return singleton.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/blobs", createObj(append(repo, ofArray$1([["content", Buffer.from(update.Content, 'utf8').toString('base64')], ["encoding", "base64"]])))), (_arg_2) => {
-                    const treeItem = {
-                        path: update.Path,
-                        mode: "100644",
-                        type: "blob",
-                        sha: GitHubValues_data(_arg_2).sha,
-                    };
-                    return singleton.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/trees", createObj(append(repo, ofArray$1([["base_tree", update.BaseSha], ["tree", [treeItem]]])))), (_arg_3) => {
-                        const treeSha = GitHubValues_data(_arg_3).sha;
-                        return singleton.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/commits", createObj(append(repo, ofArray$1([["message", update.Title], ["tree", treeSha], ["parents", [parentSha]]])))), (_arg_4) => {
-                            const commitSha = GitHubValues_data(_arg_4).sha;
-                            return singleton.Combine((publicationPlan.tag === /* CreateFrom */ 0) ? singleton.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/refs", createObj(append(repo, ofArray$1([["ref", concat$1("refs/heads/", update.Branch)], ["sha", commitSha]])))), (_arg_6) => {
-                                return singleton.Zero();
-                            }) : singleton.Bind(OctokitGateway__call(_, "PATCH /repos/{owner}/{repo}/git/refs/{ref}", createObj(append(repo, ofArray$1([["ref", concat$1("heads/", update.Branch)], ["sha", commitSha], ["force", false]])))), (_arg_5) => {
-                                return singleton.Zero();
-                            }), singleton.Delay(() => singleton.Bind(OctokitGateway__findPull(_, update.Repository, "open"), (_arg_7) => {
-                                let value$1 = undefined;
-                                const existing = _arg_7;
-                                return singleton.Bind((existing == null) ? OctokitGateway__call(_, "POST /repos/{owner}/{repo}/pulls", createObj(append(repo, ofArray$1([["title", update.Title], ["body", update.Body], ["head", update.Branch], ["base", update.Repository.DefaultBranch]])))) : ((value$1 = value(existing), OctokitGateway__call(_, "PATCH /repos/{owner}/{repo}/pulls/{pull_number}", createObj(append(repo, ofArray$1([["pull_number", value$1.number], ["title", update.Title], ["body", update.Body]])))))), (_arg_8) => {
-                                    const pullData = GitHubValues_data(_arg_8);
-                                    return singleton.Return(new Publication(update.Branch, pullData.number, commitSha));
-                                });
-                            })));
-                        });
+            return singleton.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/blobs", createObj(append(repo, ofArray$1([["content", Buffer.from(update.Content, 'utf8').toString('base64')], ["encoding", "base64"]])))), (_arg) => {
+                const treeItem = {
+                    path: update.Path,
+                    mode: "100644",
+                    type: "blob",
+                    sha: GitHubValues_data(_arg).sha,
+                };
+                return singleton.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/trees", createObj(append(repo, ofArray$1([["base_tree", update.BaseSha], ["tree", [treeItem]]])))), (_arg_1) => {
+                    const treeSha = GitHubValues_data(_arg_1).sha;
+                    return singleton.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/commits", createObj(append(repo, ofArray$1([["message", update.Title], ["tree", treeSha], ["parents", [parentSha]]])))), (_arg_2) => {
+                        const commitSha = GitHubValues_data(_arg_2).sha;
+                        return singleton.Return(commitSha);
                     });
                 });
             });
         })))));
+    }
+    CreateBranch(repository, branch, commitSha) {
+        const _ = this;
+        return singleton.Delay(() => singleton.Combine(!Branches_isOwned(branch) ? (((() => {
+            throw new Exception("PaketaBot can only create its owned weekly branch (Parameter \'branch\')");
+        })(), singleton.Zero())) : singleton.Zero(), singleton.Delay(() => singleton.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/refs", createObj(append(OctokitGateway__repoParameters_Z212AD886(_, repository), ofArray$1([["ref", concat$1("refs/heads/", branch)], ["sha", commitSha]])))), (_arg) => singleton.Return(undefined)))));
+    }
+    FastForwardBranch(repository, branch, commitSha) {
+        const _ = this;
+        return singleton.Delay(() => singleton.Combine(!Branches_isOwned(branch) ? (((() => {
+            throw new Exception("PaketaBot can only update its owned weekly branch (Parameter \'branch\')");
+        })(), singleton.Zero())) : singleton.Zero(), singleton.Delay(() => singleton.Bind(OctokitGateway__call(_, "PATCH /repos/{owner}/{repo}/git/refs/{ref}", createObj(append(OctokitGateway__repoParameters_Z212AD886(_, repository), ofArray$1([["ref", concat$1("heads/", branch)], ["sha", commitSha], ["force", false]])))), (_arg) => singleton.Return(undefined)))));
+    }
+    CreatePullRequest(update) {
+        const _ = this;
+        return singleton.Delay(() => singleton.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/pulls", createObj(append(OctokitGateway__repoParameters_Z212AD886(_, update.Repository), ofArray$1([["title", update.Title], ["body", update.Body], ["head", update.Branch], ["base", update.Repository.DefaultBranch]])))), (_arg) => singleton.Return(GitHubValues_data(_arg).number)));
+    }
+    UpdatePullRequest(update, pullRequestNumber) {
+        const _ = this;
+        return singleton.Delay(() => singleton.Bind(OctokitGateway__call(_, "PATCH /repos/{owner}/{repo}/pulls/{pull_number}", createObj(append(OctokitGateway__repoParameters_Z212AD886(_, update.Repository), ofArray$1([["pull_number", pullRequestNumber], ["title", update.Title], ["body", update.Body]])))), (_arg) => singleton.Return(undefined)));
     }
 }
 function OctokitGateway_$ctor_Z721C83C5(token) {
@@ -42417,7 +42450,7 @@ function OctokitGateway__getPublisherLogin(this$) {
     });
 }
 function OctokitGateway__findPull(this$, repository, state) {
-    return singleton.Delay(() => singleton.Bind(OctokitGateway__getPublisherLogin(this$), (_arg) => singleton.Bind(OctokitGateway__call(this$, "GET /repos/{owner}/{repo}/pulls", createObj(append(OctokitGateway__repoParameters_Z212AD886(this$, repository), ofArray$1([["state", state], ["head", concat$1(repository.Owner, ":", "paketabot/weekly")], ["per_page", 100]])))), (_arg_1) => {
+    return singleton.Delay(() => singleton.Bind(OctokitGateway__getPublisherLogin(this$), (_arg) => singleton.Bind(OctokitGateway__call(this$, "GET /repos/{owner}/{repo}/pulls", createObj(append(OctokitGateway__repoParameters_Z212AD886(this$, repository), ofArray$1([["state", state], ["head", concat$1(repository.Owner, ":", "paketabot/weekly")], ["sort", "created"], ["direction", "desc"], ["per_page", 100]])))), (_arg_1) => {
         const pulls = GitHubValues_data(_arg_1);
         return singleton.Return(tryFind$1((value) => GitHubValues_isTrackedPull(repository, _arg, value), pulls));
     })));

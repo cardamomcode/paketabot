@@ -79,6 +79,11 @@ Future GitHub App support will provide the installation identity alongside a
 short-lived token through the authentication adapter. A centrally owned App
 private key must never be distributed to consuming repositories.
 
+Most interrupted publications recover by rerunning the workflow. If GitHub did
+not confirm pull-request creation after moving the bot branch, use the
+[fail-closed recovery procedure](docs/recovery.md); PaketaBot will not guess
+that an untracked branch belongs to it.
+
 ## Development
 
 Requirements:
@@ -100,7 +105,7 @@ under `dist/` are generated artifacts and must not be edited manually.
 See [Architecture](docs/architecture.md) and the
 [Threat model](docs/threat-model.md) for the trust boundary and remaining
 release work. Maintainers should also follow the
-[release procedure](docs/releasing.md).
+[release procedure](docs/releasing.md) and [recovery procedure](docs/recovery.md).
 
 PaketaBot adopts [Agent Decision Comments](https://github.com/dbrattli/adc).
 The pinned local convention is in `AGENT_DECISION_COMMENTS.md`.

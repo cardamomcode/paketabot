@@ -32,6 +32,12 @@ cross-tenant risk, but it does not make dependency content trustworthy.
   authenticated token identity records the same head; an untracked or
   mismatched head is rejected.
 - Existing bot branches move through non-forced fast-forwards.
+- Refreshing an open owned pull request updates its metadata before moving the
+  branch, so no fallible GitHub API call follows the ref update.
+- An uncertain pull-request creation is retried before any manual action. If no
+  owned pull request exists, publication fails closed and requires the
+  documented human-verified recovery procedure; the bot never automatically
+  deletes an untracked ref.
 - Third-party Actions are pinned to reviewed full commit SHAs rather than
   mutable version tags.
 - Repository-level immutable releases are enabled. Released workflows use their
@@ -52,8 +58,6 @@ identity.
 
 - Publish and smoke-test `v1.0.0` from the reviewed release commit. Confirm that
   its reusable workflow invokes the same immutable tag in both jobs.
-- Make branch mutation and pull-request mutation recoverable across partial
-  GitHub API failures.
 - Add bounded diagnostic logging that reliably redacts tokens and repository
   secrets.
 - Exercise the resolver with malicious Paket files, oversized files, parser
@@ -64,8 +68,6 @@ identity.
   NuGet client vulnerabilities.
 - Document and test private-workflow sharing, token rotation, artifact retention,
   and the GitHub App migration path.
-- Define an explicit recovery procedure when the publisher identity changes or
-  the ownership pull request is edited or deleted.
 - After changing the repository to public, require CI on `main` and prevent
   branch deletion and force pushes. The current GitHub plan does not expose
   repository rulesets while this repository remains private.

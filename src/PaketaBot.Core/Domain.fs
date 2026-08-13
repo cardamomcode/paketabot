@@ -40,12 +40,12 @@ type Publication = {
     Branch: string
     PullRequestNumber: int
     HeadSha: string
+    IsOpen: bool
 }
 
 type PublishUpdate = {
     Repository: Repository
     BaseSha: string
-    PreviousPublication: Publication option
     Branch: string
     Path: string
     Content: string

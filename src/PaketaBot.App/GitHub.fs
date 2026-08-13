@@ -50,6 +50,8 @@ type OctokitGateway(token: string) =
                         @ [
                             "state" ==> state
                             "head" ==> $"{repository.Owner}:{Branches.Weekly}"
+                            "sort" ==> "created"
+                            "direction" ==> "desc"
                             "per_page" ==> 100
                         ]
                     ))
@@ -73,7 +75,14 @@ type OctokitGateway(token: string) =
 
         member _.TryGetPublication repository =
             async {
-                let! pull = findPull repository "all"
+                // decision: prefers the open ownership record because the stable branch can have several historical pull requests
+                // invariant: a newer closed pull request is considered only when no owned open pull request exists
+                let! openPull = findPull repository "open"
+
+                let! pull =
+                    match openPull with
+                    | Some value -> async { return Some value }
+                    | None -> findPull repository "closed"
 
                 return
                     pull
@@ -81,10 +90,29 @@ type OctokitGateway(token: string) =
                         Branch = Branches.Weekly
                         PullRequestNumber = value?number
                         HeadSha = value?head?sha
+                        IsOpen = string value?state = "open"
                     })
             }
 
-        member _.Publish update =
+        member _.GetBranchHead(repository, branch) =
+            async {
+                if not (Branches.isOwned branch) then
+                    invalidArg (nameof branch) "PaketaBot can only inspect its owned weekly branch"
+
+                let repo = repoParameters repository
+
+                let! currentRef =
+                    call "GET /repos/{owner}/{repo}/git/ref/{ref}" (createObj (repo @ [ "ref" ==> $"heads/{branch}" ]))
+                    |> Async.Catch
+
+                return
+                    match currentRef with
+                    | Choice1Of2 response -> Some((GitHubValues.data response)?``object``?sha)
+                    | Choice2Of2 error when isNotFound error -> None
+                    | Choice2Of2 error -> raise error
+            }
+
+        member _.CreateCommit(update, parentSha) =
             async {
                 if not (Branches.isOwned update.Branch) then
                     invalidArg (nameof update.Branch) "PaketaBot can only publish its owned weekly branch"
@@ -93,30 +121,6 @@ type OctokitGateway(token: string) =
                     invalidArg (nameof update.Path) "PaketaBot can only publish paket.lock"
 
                 let repo = repoParameters update.Repository
-
-                let! currentRef =
-                    call
-                        "GET /repos/{owner}/{repo}/git/ref/{ref}"
-                        (createObj (repo @ [ "ref" ==> $"heads/{update.Branch}" ]))
-                    |> Async.Catch
-
-                let currentHead =
-                    match currentRef with
-                    | Choice1Of2 response -> Some((GitHubValues.data response)?``object``?sha)
-                    | Choice2Of2 error when isNotFound error -> None
-                    | Choice2Of2 error -> raise error
-
-                let expectedHead = update.PreviousPublication |> Option.map _.HeadSha
-
-                let publicationPlan =
-                    match Branches.planPublication update.BaseSha expectedHead currentHead with
-                    | Ok plan -> plan
-                    | Error message -> invalidOp message
-
-                let parentSha =
-                    match publicationPlan with
-                    | Branches.CreateFrom baseSha -> baseSha
-                    | Branches.FastForwardFrom verifiedHead -> verifiedHead
 
                 let! blob =
                     call
@@ -153,57 +157,72 @@ type OctokitGateway(token: string) =
                         ))
 
                 let commitSha: string = (GitHubValues.data commit)?sha
+                return commitSha
+            }
 
-                match publicationPlan with
-                | Branches.FastForwardFrom _ ->
-                    let! _ =
-                        call
-                            "PATCH /repos/{owner}/{repo}/git/refs/{ref}"
-                            (createObj (
-                                repo
-                                @ [ "ref" ==> $"heads/{update.Branch}"; "sha" ==> commitSha; "force" ==> false ]
-                            ))
+        member _.CreateBranch(repository, branch, commitSha) =
+            async {
+                if not (Branches.isOwned branch) then
+                    invalidArg (nameof branch) "PaketaBot can only create its owned weekly branch"
 
-                    ()
-                | Branches.CreateFrom _ ->
-                    let! _ =
-                        call
-                            "POST /repos/{owner}/{repo}/git/refs"
-                            (createObj (repo @ [ "ref" ==> $"refs/heads/{update.Branch}"; "sha" ==> commitSha ]))
+                let! _ =
+                    call
+                        "POST /repos/{owner}/{repo}/git/refs"
+                        (createObj (
+                            repoParameters repository
+                            @ [ "ref" ==> $"refs/heads/{branch}"; "sha" ==> commitSha ]
+                        ))
 
-                    ()
+                return ()
+            }
 
-                let! existing = findPull update.Repository "open"
+        member _.FastForwardBranch(repository, branch, commitSha) =
+            async {
+                if not (Branches.isOwned branch) then
+                    invalidArg (nameof branch) "PaketaBot can only update its owned weekly branch"
 
+                let! _ =
+                    call
+                        "PATCH /repos/{owner}/{repo}/git/refs/{ref}"
+                        (createObj (
+                            repoParameters repository
+                            @ [ "ref" ==> $"heads/{branch}"; "sha" ==> commitSha; "force" ==> false ]
+                        ))
+
+                return ()
+            }
+
+        member _.CreatePullRequest update =
+            async {
                 let! pull =
-                    match existing with
-                    | Some value ->
-                        let number: int = value?number
+                    call
+                        "POST /repos/{owner}/{repo}/pulls"
+                        (createObj (
+                            repoParameters update.Repository
+                            @ [
+                                "title" ==> update.Title
+                                "body" ==> update.Body
+                                "head" ==> update.Branch
+                                "base" ==> update.Repository.DefaultBranch
+                            ]
+                        ))
 
-                        call
-                            "PATCH /repos/{owner}/{repo}/pulls/{pull_number}"
-                            (createObj (
-                                repo
-                                @ [ "pull_number" ==> number; "title" ==> update.Title; "body" ==> update.Body ]
-                            ))
-                    | None ->
-                        call
-                            "POST /repos/{owner}/{repo}/pulls"
-                            (createObj (
-                                repo
-                                @ [
-                                    "title" ==> update.Title
-                                    "body" ==> update.Body
-                                    "head" ==> update.Branch
-                                    "base" ==> update.Repository.DefaultBranch
-                                ]
-                            ))
+                return (GitHubValues.data pull)?number
+            }
 
-                let pullData = GitHubValues.data pull
+        member _.UpdatePullRequest(update, pullRequestNumber) =
+            async {
+                let! _ =
+                    call
+                        "PATCH /repos/{owner}/{repo}/pulls/{pull_number}"
+                        (createObj (
+                            repoParameters update.Repository
+                            @ [
+                                "pull_number" ==> pullRequestNumber
+                                "title" ==> update.Title
+                                "body" ==> update.Body
+                            ]
+                        ))
 
-                return {
-                    Branch = update.Branch
-                    PullRequestNumber = pullData?number
-                    HeadSha = commitSha
-                }
+                return ()
             }
