@@ -31,7 +31,9 @@ cross-tenant risk, but it does not make dependency content trustworthy.
 - An existing branch is trusted only when a marked pull request created by the
   authenticated token identity records the same head; an untracked or
   mismatched head is rejected.
-- Existing bot branches move through non-forced fast-forwards.
+- Existing bot branches move through non-forced fast-forwards. Refresh commits
+  merge the exact current base behind the verified bot head so intervening base
+  changes do not enter the pull-request diff.
 - Refreshing an open owned pull request updates its metadata before moving the
   branch, so no fallible GitHub API call follows the ref update.
 - An uncertain pull-request creation is retried before any manual action. If no

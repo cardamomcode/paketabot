@@ -161,10 +161,19 @@ module Branches =
     ///
     /// decision: refreshes descend from the verified bot head while their tree snapshots the latest default branch
     /// invariant: an existing owned branch moves only by non-forced fast-forward from its verified current head
-    /// tradeoff: retains bot branch history instead of rebasing it to prevent check-then-force overwrite races
+    /// tradeoff: retains bot branch history instead of force-rebasing it to prevent check-then-overwrite races
     let planPublication baseSha expectedHead currentHead =
         match currentHead, expectedHead with
         | None, _ -> Ok(CreateFrom baseSha)
         | Some actual, Some expected when actual = expected -> Ok(FastForwardFrom actual)
         | Some _, None -> Error "the target branch exists but is not tracked as PaketaBot-owned"
         | Some _, Some _ -> Error "the target branch changed outside PaketaBot; refusing to overwrite it"
+
+    /// Select commit parents that preserve branch ownership and the pull request's lockfile-only diff.
+    ///
+    /// decision: refreshes merge the exact base behind the verified bot head so main is an ancestor without force-pushing
+    /// invariant: the verified bot head is the first refresh parent and the exact current base is the second parent
+    let commitParents baseSha publicationPlan =
+        match publicationPlan with
+        | CreateFrom sha -> [ sha ]
+        | FastForwardFrom verifiedHead -> [ verifiedHead; baseSha ]

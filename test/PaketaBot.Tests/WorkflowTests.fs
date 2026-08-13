@@ -47,9 +47,10 @@ type private GitHub(initialPublication: Publication option, initialHead: string 
                 return currentHead
             }
 
-        member _.CreateCommit(value, parentSha) =
+        member _.CreateCommit(value, parentShas) =
             async {
-                operations.Add($"create commit from {parentSha}")
+                let parentDescription = String.concat " + " parentShas
+                operations.Add($"create commit from {parentDescription}")
                 published <- Some value
                 commitNumber <- commitNumber + 1
                 return $"commit-{commitNumber}"
@@ -246,7 +247,8 @@ let private publishTests =
                         }
 
                         let github = GitHub(Some previous, Some previous.HeadSha, NoFailure)
-                        let! outcome = PublishService(github).Run(repository, String.replicate 40 "a", updatedResult)
+                        let baseSha = String.replicate 40 "a"
+                        let! outcome = PublishService(github).Run(repository, baseSha, updatedResult)
 
                         match outcome with
                         | Published publication ->
@@ -257,7 +259,7 @@ let private publishTests =
                                 (isEqualTo [
                                     "get publication"
                                     "get branch head"
-                                    $"create commit from {previous.HeadSha}"
+                                    $"create commit from {previous.HeadSha} + {baseSha}"
                                     $"update pull request {previous.PullRequestNumber}"
                                     $"fast-forward {Branches.Weekly}"
                                 ])
@@ -298,7 +300,8 @@ let private publishTests =
                         }
 
                         let github = GitHub(Some previous, Some previous.HeadSha, NoFailure)
-                        let! outcome = PublishService(github).Run(repository, String.replicate 40 "a", updatedResult)
+                        let baseSha = String.replicate 40 "a"
+                        let! outcome = PublishService(github).Run(repository, baseSha, updatedResult)
 
                         match outcome with
                         | Published publication -> assertThat publication.PullRequestNumber (isEqualTo 42)
@@ -309,7 +312,7 @@ let private publishTests =
                             (isEqualTo [
                                 "get publication"
                                 "get branch head"
-                                $"create commit from {previous.HeadSha}"
+                                $"create commit from {previous.HeadSha} + {baseSha}"
                                 $"fast-forward {Branches.Weekly}"
                                 "create pull request"
                             ])
@@ -321,7 +324,8 @@ let private publishTests =
                     async {
                         let github = GitHub(None, None, LoseCreatePullRequestResponse)
                         let service = PublishService(github)
-                        let! first = service.Run(repository, String.replicate 40 "a", updatedResult)
+                        let baseSha = String.replicate 40 "a"
+                        let! first = service.Run(repository, baseSha, updatedResult)
 
                         match first with
                         | RunFailed [ message ] -> assertThat (message.Contains("Rerun PaketaBot first")) isTrue
@@ -330,7 +334,7 @@ let private publishTests =
                         assertThat github.CurrentPublication.IsSome isTrue
                         github.ClearOperations()
 
-                        let! second = service.Run(repository, String.replicate 40 "a", updatedResult)
+                        let! second = service.Run(repository, baseSha, updatedResult)
 
                         match second with
                         | Published publication -> assertThat publication.PullRequestNumber (isEqualTo 42)
@@ -341,7 +345,7 @@ let private publishTests =
                             (isEqualTo [
                                 "get publication"
                                 "get branch head"
-                                "create commit from commit-1"
+                                $"create commit from commit-1 + {baseSha}"
                                 "update pull request 42"
                                 $"fast-forward {Branches.Weekly}"
                             ])

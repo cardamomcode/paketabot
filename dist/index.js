@@ -35291,7 +35291,7 @@ class Branches_PublicationPlan extends Union {
  *
  * decision: refreshes descend from the verified bot head while their tree snapshots the latest default branch
  * invariant: an existing owned branch moves only by non-forced fast-forward from its verified current head
- * tradeoff: retains bot branch history instead of rebasing it to prevent check-then-force overwrite races
+ * tradeoff: retains bot branch history instead of force-rebasing it to prevent check-then-overwrite races
  */
 function Branches_planPublication(baseSha, expectedHead, currentHead) {
     if (currentHead != null) {
@@ -35309,6 +35309,20 @@ function Branches_planPublication(baseSha, expectedHead, currentHead) {
     }
     else {
         return FSharpResult$2_Ok(Branches_PublicationPlan_CreateFrom(baseSha));
+    }
+}
+/**
+ * Select commit parents that preserve branch ownership and the pull request's lockfile-only diff.
+ *
+ * decision: refreshes merge the exact base behind the verified bot head so main is an ancestor without force-pushing
+ * invariant: the verified bot head is the first refresh parent and the exact current base is the second parent
+ */
+function Branches_commitParents(baseSha, publicationPlan) {
+    if (publicationPlan.tag === /* FastForwardFrom */ 1) {
+        return ofArray$1([publicationPlan.fields[0], baseSha]);
+    }
+    else {
+        return singleton$1(publicationPlan.fields[0]);
     }
 }
 
@@ -37093,8 +37107,8 @@ function PublishService__Run_Z750F7FC2(_, repository, baseSha, result) {
                         else {
                             publicationPlan = matchValue_3.fields[0];
                         }
-                        const parentSha = (publicationPlan.tag === /* FastForwardFrom */ 1) ? publicationPlan.fields[0] : publicationPlan.fields[0];
-                        return singleton.Bind(_.github.CreateCommit(publish, parentSha), (_arg_3) => {
+                        const parentShas = Branches_commitParents(baseSha, publicationPlan);
+                        return singleton.Bind(_.github.CreateCommit(publish, parentShas), (_arg_3) => {
                             let previous_1 = undefined;
                             const commitSha = _arg_3;
                             return (publicationPlan.tag === /* CreateFrom */ 0) ? singleton.Bind(_.github.CreateBranch(repository, publish.Branch, commitSha), () => singleton.Bind(PublishService__createPullRequestAfterBranchMutation(_, publish, commitSha), (_arg_9) => singleton.Return(UpdateOutcome_Published(_arg_9)))) : ((previousPublication == null) ? singleton.Return((() => {
@@ -42493,12 +42507,17 @@ class OctokitGateway {
             });
         })));
     }
-    CreateCommit(update, parentSha) {
+    CreateCommit(update, parentShas) {
         const _ = this;
         return singleton.Delay(() => singleton.Combine(!Branches_isOwned(update.Branch) ? (((() => {
             throw new Exception("PaketaBot can only publish its owned weekly branch (Parameter \'Branch\')");
         })(), singleton.Zero())) : singleton.Zero(), singleton.Delay(() => singleton.Combine(!PaketFiles_isLock(update.Path) ? (((() => {
             throw new Exception("PaketaBot can only publish paket.lock (Parameter \'Path\')");
+        })(), singleton.Zero())) : singleton.Zero(), singleton.Delay(() => singleton.Combine((isEmpty(parentShas) ? true : !contains(update.BaseSha, parentShas, {
+            Equals: (x, y) => (x === y),
+            GetHashCode: (x) => (stringHash(x) | 0),
+        })) ? (((() => {
+            throw new Exception("PaketaBot commits must descend from the exact base revision (Parameter \'parentShas\')");
         })(), singleton.Zero())) : singleton.Zero(), singleton.Delay(() => {
             const repo = OctokitGateway__repoParameters_Z212AD886(_, update.Repository);
             return singleton.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/blobs", createObj(append(repo, ofArray$1([["content", Buffer.from(update.Content, 'utf8').toString('base64')], ["encoding", "base64"]])))), (_arg) => {
@@ -42510,13 +42529,13 @@ class OctokitGateway {
                 };
                 return singleton.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/trees", createObj(append(repo, ofArray$1([["base_tree", update.BaseSha], ["tree", [treeItem]]])))), (_arg_1) => {
                     const treeSha = GitHubValues_data(_arg_1).sha;
-                    return singleton.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/commits", createObj(append(repo, ofArray$1([["message", update.Title], ["tree", treeSha], ["parents", [parentSha]]])))), (_arg_2) => {
+                    return singleton.Bind(OctokitGateway__call(_, "POST /repos/{owner}/{repo}/git/commits", createObj(append(repo, ofArray$1([["message", update.Title], ["tree", treeSha], ["parents", toArray(parentShas)]])))), (_arg_2) => {
                         const commitSha = GitHubValues_data(_arg_2).sha;
                         return singleton.Return(commitSha);
                     });
                 });
             });
-        })))));
+        })))))));
     }
     CreateBranch(repository, branch, commitSha) {
         const _ = this;

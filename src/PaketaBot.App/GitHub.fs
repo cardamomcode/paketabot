@@ -112,13 +112,16 @@ type OctokitGateway(token: string) =
                     | Choice2Of2 error -> raise error
             }
 
-        member _.CreateCommit(update, parentSha) =
+        member _.CreateCommit(update, parentShas) =
             async {
                 if not (Branches.isOwned update.Branch) then
                     invalidArg (nameof update.Branch) "PaketaBot can only publish its owned weekly branch"
 
                 if not (PaketFiles.isLock update.Path) then
                     invalidArg (nameof update.Path) "PaketaBot can only publish paket.lock"
+
+                if List.isEmpty parentShas || not (List.contains update.BaseSha parentShas) then
+                    invalidArg (nameof parentShas) "PaketaBot commits must descend from the exact base revision"
 
                 let repo = repoParameters update.Repository
 
@@ -152,7 +155,7 @@ type OctokitGateway(token: string) =
                             @ [
                                 "message" ==> update.Title
                                 "tree" ==> treeSha
-                                "parents" ==> [| parentSha |]
+                                "parents" ==> List.toArray parentShas
                             ]
                         ))
 
