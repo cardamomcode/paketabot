@@ -12,6 +12,12 @@ type JsError =
 type ActionOctokit =
     abstract request: route: string * parameters: obj -> JS.Promise<obj>
 
+[<AllowNullLiteral>]
+type FileStats =
+    abstract size: int
+    abstract isFile: unit -> bool
+    abstract isSymbolicLink: unit -> bool
+
 [<Import("getOctokit", "@actions/github")>]
 let getOctokit (token: string) : ActionOctokit = jsNative
 
@@ -45,6 +51,9 @@ let mkdir path options = callMkdir mkdirNative path options
 
 [<Import("readFile", "node:fs/promises")>]
 let readFile (path: string) (encoding: string) : JS.Promise<string> = jsNative
+
+[<Import("lstat", "node:fs/promises")>]
+let lstat (path: string) : JS.Promise<FileStats> = jsNative
 
 [<Import("writeFile", "node:fs/promises")>]
 let writeFile (path: string) (content: string) : JS.Promise<unit> = jsNative

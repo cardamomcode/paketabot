@@ -8,7 +8,7 @@ remaining public-release requirement is satisfied.
 
 ## Release invariants
 
-- Consumers reference an exact release such as the private preview `v0.1.2` or
+- Consumers reference an exact release such as the private preview `v0.1.3` or
   production `v1.0.0`, never `main` or a movable major tag.
 - Both internal Action steps in the reusable workflow reference that same exact
   release.
@@ -68,9 +68,23 @@ with exact `v1.0.0` self-references and publish the production release.
 5. Record any failure without moving or deleting the published tag. Correct it
    in a new patch release.
 
+The workflow-contract tests verify that the token is absent from the resolver,
+the publisher has no checkout or command step, both operations use one exact
+release, and the cross-job artifact has one-day retention. A live smoke test is
+still required because repository Actions policies, token authorization, and
+GitHub API behavior are external to those tests.
+
 While the repository is private, explicitly grant Actions access to intended
 private test repositories under **Settings → Actions → General → Access**.
 Remove unintended access before a visibility change. When the repository
 becomes public, enable secret scanning, private vulnerability reporting, and
 the `main` branch rules listed in the threat model before announcing the
 release.
+
+Rotating a fine-grained token for the same GitHub login preserves the ownership
+record. Changing the login does not; follow the identity-change procedure in
+the recovery document. A future GitHub App may supply a short-lived
+installation token and its bot login through the same publish input, but the
+current workflow neither stores an App private key nor obtains installation
+tokens. That key belongs in an organization-controlled broker or hosted App,
+never in consuming repositories.

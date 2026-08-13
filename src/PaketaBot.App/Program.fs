@@ -44,6 +44,22 @@ let private writeResolution path artifact =
         do! writeFile path (Serialization.encodeArtifact artifact) |> Async.AwaitPromise
     }
 
+let private readArtifact path =
+    async {
+        let! stats = lstat path |> Async.AwaitPromise
+
+        match
+            PaketFiles.validateInput
+                "the resolution artifact"
+                PaketFiles.MaxArtifactBytes
+                stats.size
+                (stats.isFile ())
+                (stats.isSymbolicLink ())
+        with
+        | Error message -> return invalidOp message
+        | Ok() -> return! readFile path "utf8" |> Async.AwaitPromise
+    }
+
 let private resolveDependencies () =
     async {
         let workspace = requiredEnvironment "GITHUB_WORKSPACE"
@@ -88,12 +104,12 @@ let private publishResolution token =
         let repositoryName = requiredEnvironment "GITHUB_REPOSITORY"
         let eventSha = requiredEnvironment "GITHUB_SHA"
         let resultPath = requiredInput "result-path"
-        let! json = readFile resultPath "utf8" |> Async.AwaitPromise
+        let! json = readArtifact resultPath
 
         let artifact: ResolutionArtifact =
             match Serialization.decodeArtifact json with
             | Ok value -> value
-            | Error errors -> errors |> List.map string |> failureMessage |> invalidOp
+            | Error _ -> invalidOp "the resolution artifact is invalid"
 
         ResolutionArtifacts.validate repositoryName eventSha artifact |> requireValid
 
@@ -136,9 +152,9 @@ let private start () =
             match operation with
             | ResolveOperation -> do! resolveDependencies ()
             | PublishOperation -> do! publishResolution token
-        with ex ->
+        with _ ->
             setOutput "outcome" "failed"
-            setFailed ex.Message
+            setFailed "PaketaBot failed without exposing untrusted error details."
     }
 
 [<EntryPoint>]

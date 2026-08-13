@@ -32,7 +32,7 @@ import require$$1$5 from 'node:dns';
 import require$$5$3 from 'string_decoder';
 import 'child_process';
 import 'timers';
-import { mkdir as mkdir$2, readFile, writeFile as writeFile$1 } from 'node:fs/promises';
+import { mkdir as mkdir$2, lstat as lstat$1, readFile, writeFile as writeFile$1 } from 'node:fs/promises';
 import { execFile as execFile$1 } from 'node:child_process';
 import { join as join$1, dirname } from 'node:path';
 
@@ -28431,14 +28431,14 @@ function setOutput(name, value) {
  */
 function setFailed(message) {
     process.exitCode = ExitCode.Failure;
-    error$1(message);
+    error(message);
 }
 /**
  * Adds an error issue
  * @param message error issue message. Errors will be converted to string via toString()
  * @param properties optional properties to add to the annotation.
  */
-function error$1(message, properties = {}) {
+function error(message, properties = {}) {
     issueCommand('error', toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
 /**
@@ -30729,11 +30729,6 @@ function contains$1(str, pattern, ic) {
         return str.includes(pattern);
     }
 }
-function indexOf(str, searchValue, comparison, startIndex = 0) {
-    { // fast path
-        return str.indexOf(searchValue, startIndex);
-    }
-}
 function printf(input) {
     return {
         input,
@@ -31221,6 +31216,9 @@ function value(x) {
 function some(x) {
     return x == null || x instanceof Some ? new Some(x) : x;
 }
+function defaultArg(opt, defaultValue) {
+    return (opt != null) ? value(opt) : defaultValue;
+}
 
 function tryParse$2(str, defValue) {
     // TODO: test if value is valid and in range
@@ -31552,10 +31550,6 @@ function choose$2(chooser, array, cons) {
         return res;
     }
 }
-function fold$3(folder, state, array) {
-    const folder_1 = folder;
-    return array.reduce((folder_1), state);
-}
 function sortBy(projection, xs, comparer) {
     const xs_1 = xs.slice();
     xs_1.sort((x, y) => (comparer.Compare(projection(x), projection(y)) | 0));
@@ -31591,6 +31585,14 @@ function equalsWith(equals, source1, source2) {
             }
             return result;
         }
+    }
+}
+function tryHead(array) {
+    if (array.length === 0) {
+        return undefined;
+    }
+    else {
+        return some(item(0, array));
     }
 }
 function item(index, array) {
@@ -31853,7 +31855,7 @@ function Enumerator_generateWhileSome(openf, compute, closef) {
 function mkSeq(f) {
     return Enumerator_Seq_$ctor_673A07F2(f);
 }
-function ofSeq$2(xs) {
+function ofSeq$1(xs) {
     return getEnumerator(Operators_NullArgCheck("source", xs));
 }
 function delay(generator) {
@@ -31876,7 +31878,7 @@ function toList$1(xs) {
         return xs;
     }
     else {
-        return ofSeq$1(xs);
+        return ofSeq(xs);
     }
 }
 function generate(create, compute, dispose) {
@@ -31886,7 +31888,7 @@ function append$1(xs, ys) {
     return concat([xs, ys]);
 }
 function choose$1(chooser, xs) {
-    return generate(() => ofSeq$2(xs), (e) => {
+    return generate(() => ofSeq$1(xs), (e) => {
         let curr = undefined;
         while ((curr == null) && e["System.Collections.IEnumerator.MoveNext"]()) {
             curr = chooser(e["System.Collections.Generic.IEnumerator`1.get_Current"]());
@@ -31897,9 +31899,9 @@ function choose$1(chooser, xs) {
     });
 }
 function compareWith(comparer, xs, ys) {
-    const e1 = ofSeq$2(xs);
+    const e1 = ofSeq$1(xs);
     try {
-        const e2 = ofSeq$2(ys);
+        const e2 = ofSeq$1(ys);
         try {
             let c = 0;
             let b1 = e1["System.Collections.IEnumerator.MoveNext"]();
@@ -31932,7 +31934,7 @@ function filter(f, xs) {
     }, xs);
 }
 function exists$1(predicate, xs) {
-    const e = ofSeq$2(xs);
+    const e = ofSeq$1(xs);
     try {
         let found = false;
         while (!found && e["System.Collections.IEnumerator.MoveNext"]()) {
@@ -31945,7 +31947,7 @@ function exists$1(predicate, xs) {
     }
 }
 function fold$2(folder, state, xs) {
-    const e = ofSeq$2(xs);
+    const e = ofSeq$1(xs);
     try {
         let acc = state;
         while (e["System.Collections.IEnumerator.MoveNext"]()) {
@@ -31969,7 +31971,7 @@ function iterateIndexed(action, xs) {
     }, 0, xs);
 }
 function map$1(mapping, xs) {
-    return generate(() => ofSeq$2(xs), (e) => (e["System.Collections.IEnumerator.MoveNext"]() ? some(mapping(e["System.Collections.Generic.IEnumerator`1.get_Current"]())) : undefined), (e_1) => {
+    return generate(() => ofSeq$1(xs), (e) => (e["System.Collections.IEnumerator.MoveNext"]() ? some(mapping(e["System.Collections.Generic.IEnumerator`1.get_Current"]())) : undefined), (e_1) => {
         disposeSafe(e_1);
     });
 }
@@ -32237,6 +32239,9 @@ function singleton$1(x) {
 function isEmpty(xs) {
     return FSharpList__get_IsEmpty(xs);
 }
+function length(xs) {
+    return FSharpList__get_Length(xs) | 0;
+}
 function head(xs) {
     return FSharpList__get_Head(xs);
 }
@@ -32283,7 +32288,7 @@ function ofArrayWithTail(xs, tail_1) {
 function ofArray$1(xs) {
     return ofArrayWithTail(xs, FSharpList_get_Empty());
 }
-function ofSeq$1(xs) {
+function ofSeq(xs) {
     if (isArrayLike(xs)) {
         return ofArray$1(xs);
     }
@@ -32365,6 +32370,31 @@ function contains(value, xs, eq) {
 }
 function exists(f, xs) {
     return tryFindIndex(f, xs) != null;
+}
+function truncate(count, xs) {
+    const loop = (i_mut, acc_mut, xs_1_mut) => {
+        loop: while (true) {
+            const i = i_mut, acc = acc_mut, xs_1 = xs_1_mut;
+            let t = undefined;
+            if (i <= 0) {
+                return acc;
+            }
+            else if (FSharpList__get_IsEmpty(xs_1)) {
+                return acc;
+            }
+            else {
+                i_mut = (i - 1);
+                acc_mut = ((t = (new FSharpList(FSharpList__get_Head(xs_1), undefined)), (acc.tail = t, t)));
+                xs_1_mut = FSharpList__get_Tail(xs_1);
+                continue loop;
+            }
+        }
+    };
+    const root = FSharpList_get_Empty();
+    const node = loop(count, root, xs);
+    const t_2 = FSharpList_get_Empty();
+    node.tail = t_2;
+    return FSharpList__get_Tail(root);
 }
 
 class CancellationToken {
@@ -35236,6 +35266,37 @@ function PullRequests_isOwnedBy(expectedAuthor, actualAuthor, body) {
 function PaketFiles_isLock(path) {
     return compare(path, "paket.lock", 4) === 0;
 }
+/**
+ * Bound every repository-controlled file before it is read into memory or
+ * exchanged between jobs.
+ *
+ * decision: uses explicit byte ceilings because GitHub artifact limits do not protect the Action process itself
+ * invariant: dependencies, lock, and artifact inputs larger than their declared ceiling are rejected before reading
+ */
+function PaketFiles_validateSize(description, maximumBytes, actualBytes) {
+    if (actualBytes < 0) {
+        return FSharpResult$2_Error$(`${description} has an invalid size`);
+    }
+    else if (actualBytes > maximumBytes) {
+        return FSharpResult$2_Error$(`${description} exceeds the ${maximumBytes}-byte limit`);
+    }
+    else {
+        return FSharpResult$2_Ok(undefined);
+    }
+}
+/**
+ * Apply the complete pre-read policy to one observed filesystem entry.
+ *
+ * invariant: an accepted input is a regular non-symbolic-link entry within its byte ceiling
+ */
+function PaketFiles_validateInput(description, maximumBytes, actualBytes, isRegularFile, isSymbolicLink) {
+    if (isSymbolicLink ? true : !isRegularFile) {
+        return FSharpResult$2_Error$(`${description} must be a regular file, not a symbolic link or special file`);
+    }
+    else {
+        return PaketFiles_validateSize(description, maximumBytes, actualBytes);
+    }
+}
 function Checkouts_validateRevision(eventSha, resolvedSha) {
     if (compare(eventSha, resolvedSha, 4) === 0) {
         return FSharpResult$2_Ok(undefined);
@@ -35557,1171 +35618,6 @@ function HashSet__Remove_2B595(this$, k) {
     }
 }
 
-class SetTreeLeaf$1 {
-    k;
-    constructor(k) {
-        this.k = k;
-    }
-}
-function SetTreeLeaf$1_$ctor_2B595(k) {
-    return new SetTreeLeaf$1(k);
-}
-function SetTreeLeaf$1__get_Key(_) {
-    return _.k;
-}
-class SetTreeNode$1 extends SetTreeLeaf$1 {
-    right;
-    left;
-    h;
-    constructor(v, left, right, h) {
-        super(v);
-        this.left = left;
-        this.right = right;
-        this.h = (h | 0);
-    }
-}
-function SetTreeNode$1_$ctor_5F465FC9(v, left, right, h) {
-    return new SetTreeNode$1(v, left, right, h);
-}
-function SetTreeNode$1__get_Left(_) {
-    return _.left;
-}
-function SetTreeNode$1__get_Right(_) {
-    return _.right;
-}
-function SetTreeNode$1__get_Height(_) {
-    return _.h | 0;
-}
-function SetTreeModule_empty() {
-    return undefined;
-}
-function SetTreeModule_countAux(t_mut, acc_mut) {
-    SetTreeModule_countAux: while (true) {
-        const t = t_mut, acc = acc_mut;
-        if (t != null) {
-            const t2 = value(t);
-            if (t2 instanceof SetTreeNode$1) {
-                const tn = t2;
-                t_mut = SetTreeNode$1__get_Left(tn);
-                acc_mut = SetTreeModule_countAux(SetTreeNode$1__get_Right(tn), acc + 1);
-                continue SetTreeModule_countAux;
-            }
-            else {
-                return (acc + 1) | 0;
-            }
-        }
-        else {
-            return acc | 0;
-        }
-    }
-}
-function SetTreeModule_count(s) {
-    return SetTreeModule_countAux(s, 0) | 0;
-}
-function SetTreeModule_mk(l, k, r) {
-    let tn = undefined, tn_1 = undefined;
-    let hl;
-    const t = l;
-    if (t != null) {
-        const t2 = value(t);
-        hl = ((t2 instanceof SetTreeNode$1) ? ((tn = t2, SetTreeNode$1__get_Height(tn))) : 1);
-    }
-    else {
-        hl = 0;
-    }
-    let hr;
-    const t_1 = r;
-    if (t_1 != null) {
-        const t2_1 = value(t_1);
-        hr = ((t2_1 instanceof SetTreeNode$1) ? ((tn_1 = t2_1, SetTreeNode$1__get_Height(tn_1))) : 1);
-    }
-    else {
-        hr = 0;
-    }
-    const m = ((hl < hr) ? hr : hl) | 0;
-    if (m === 0) {
-        return SetTreeLeaf$1_$ctor_2B595(k);
-    }
-    else {
-        return SetTreeNode$1_$ctor_5F465FC9(k, l, r, m + 1);
-    }
-}
-function SetTreeModule_rebalance(t1, v, t2) {
-    let tn = undefined, tn_1 = undefined, t_2 = undefined, t2_3 = undefined, tn_2 = undefined, t_3 = undefined, t2_4 = undefined, tn_3 = undefined;
-    let t1h;
-    const t = t1;
-    if (t != null) {
-        const t2_1 = value(t);
-        t1h = ((t2_1 instanceof SetTreeNode$1) ? ((tn = t2_1, SetTreeNode$1__get_Height(tn))) : 1);
-    }
-    else {
-        t1h = 0;
-    }
-    let t2h;
-    const t_1 = t2;
-    if (t_1 != null) {
-        const t2_2 = value(t_1);
-        t2h = ((t2_2 instanceof SetTreeNode$1) ? ((tn_1 = t2_2, SetTreeNode$1__get_Height(tn_1))) : 1);
-    }
-    else {
-        t2h = 0;
-    }
-    if (t2h > (t1h + 2)) {
-        const matchValue = value(t2);
-        if (matchValue instanceof SetTreeNode$1) {
-            const t2$0027 = matchValue;
-            if (((t_2 = SetTreeNode$1__get_Left(t2$0027), (t_2 != null) ? ((t2_3 = value(t_2), (t2_3 instanceof SetTreeNode$1) ? ((tn_2 = t2_3, SetTreeNode$1__get_Height(tn_2))) : 1)) : 0)) > (t1h + 1)) {
-                const matchValue_1 = value(SetTreeNode$1__get_Left(t2$0027));
-                if (matchValue_1 instanceof SetTreeNode$1) {
-                    const t2l = matchValue_1;
-                    return SetTreeModule_mk(SetTreeModule_mk(t1, v, SetTreeNode$1__get_Left(t2l)), SetTreeLeaf$1__get_Key(t2l), SetTreeModule_mk(SetTreeNode$1__get_Right(t2l), SetTreeLeaf$1__get_Key(t2$0027), SetTreeNode$1__get_Right(t2$0027)));
-                }
-                else {
-                    throw new Exception("internal error: Set.rebalance");
-                }
-            }
-            else {
-                return SetTreeModule_mk(SetTreeModule_mk(t1, v, SetTreeNode$1__get_Left(t2$0027)), SetTreeLeaf$1__get_Key(t2$0027), SetTreeNode$1__get_Right(t2$0027));
-            }
-        }
-        else {
-            throw new Exception("internal error: Set.rebalance");
-        }
-    }
-    else if (t1h > (t2h + 2)) {
-        const matchValue_2 = value(t1);
-        if (matchValue_2 instanceof SetTreeNode$1) {
-            const t1$0027 = matchValue_2;
-            if (((t_3 = SetTreeNode$1__get_Right(t1$0027), (t_3 != null) ? ((t2_4 = value(t_3), (t2_4 instanceof SetTreeNode$1) ? ((tn_3 = t2_4, SetTreeNode$1__get_Height(tn_3))) : 1)) : 0)) > (t2h + 1)) {
-                const matchValue_3 = value(SetTreeNode$1__get_Right(t1$0027));
-                if (matchValue_3 instanceof SetTreeNode$1) {
-                    const t1r = matchValue_3;
-                    return SetTreeModule_mk(SetTreeModule_mk(SetTreeNode$1__get_Left(t1$0027), SetTreeLeaf$1__get_Key(t1$0027), SetTreeNode$1__get_Left(t1r)), SetTreeLeaf$1__get_Key(t1r), SetTreeModule_mk(SetTreeNode$1__get_Right(t1r), v, t2));
-                }
-                else {
-                    throw new Exception("internal error: Set.rebalance");
-                }
-            }
-            else {
-                return SetTreeModule_mk(SetTreeNode$1__get_Left(t1$0027), SetTreeLeaf$1__get_Key(t1$0027), SetTreeModule_mk(SetTreeNode$1__get_Right(t1$0027), v, t2));
-            }
-        }
-        else {
-            throw new Exception("internal error: Set.rebalance");
-        }
-    }
-    else {
-        return SetTreeModule_mk(t1, v, t2);
-    }
-}
-function SetTreeModule_add(comparer, k, t) {
-    if (t != null) {
-        const t2 = value(t);
-        const c = comparer.Compare(k, SetTreeLeaf$1__get_Key(t2)) | 0;
-        if (t2 instanceof SetTreeNode$1) {
-            const tn = t2;
-            if (c < 0) {
-                return SetTreeModule_rebalance(SetTreeModule_add(comparer, k, SetTreeNode$1__get_Left(tn)), SetTreeLeaf$1__get_Key(tn), SetTreeNode$1__get_Right(tn));
-            }
-            else if (c === 0) {
-                return t;
-            }
-            else {
-                return SetTreeModule_rebalance(SetTreeNode$1__get_Left(tn), SetTreeLeaf$1__get_Key(tn), SetTreeModule_add(comparer, k, SetTreeNode$1__get_Right(tn)));
-            }
-        }
-        else {
-            const c_1 = comparer.Compare(k, SetTreeLeaf$1__get_Key(t2)) | 0;
-            if (c_1 < 0) {
-                return SetTreeNode$1_$ctor_5F465FC9(k, SetTreeModule_empty(), t, 2);
-            }
-            else if (c_1 === 0) {
-                return t;
-            }
-            else {
-                return SetTreeNode$1_$ctor_5F465FC9(k, t, SetTreeModule_empty(), 2);
-            }
-        }
-    }
-    else {
-        return SetTreeLeaf$1_$ctor_2B595(k);
-    }
-}
-function SetTreeModule_mem(comparer_mut, k_mut, t_mut) {
-    SetTreeModule_mem: while (true) {
-        const comparer = comparer_mut, k = k_mut, t = t_mut;
-        if (t != null) {
-            const t2 = value(t);
-            const c = comparer.Compare(k, SetTreeLeaf$1__get_Key(t2)) | 0;
-            if (t2 instanceof SetTreeNode$1) {
-                const tn = t2;
-                if (c < 0) {
-                    comparer_mut = comparer;
-                    k_mut = k;
-                    t_mut = SetTreeNode$1__get_Left(tn);
-                    continue SetTreeModule_mem;
-                }
-                else if (c === 0) {
-                    return true;
-                }
-                else {
-                    comparer_mut = comparer;
-                    k_mut = k;
-                    t_mut = SetTreeNode$1__get_Right(tn);
-                    continue SetTreeModule_mem;
-                }
-            }
-            else {
-                return c === 0;
-            }
-        }
-        else {
-            return false;
-        }
-    }
-}
-function SetTreeModule_iter(f_mut, t_mut) {
-    SetTreeModule_iter: while (true) {
-        const f = f_mut, t = t_mut;
-        if (t != null) {
-            const t2 = value(t);
-            if (t2 instanceof SetTreeNode$1) {
-                const tn = t2;
-                SetTreeModule_iter(f, SetTreeNode$1__get_Left(tn));
-                f(SetTreeLeaf$1__get_Key(tn));
-                f_mut = f;
-                t_mut = SetTreeNode$1__get_Right(tn);
-                continue SetTreeModule_iter;
-            }
-            else {
-                f(SetTreeLeaf$1__get_Key(t2));
-            }
-        }
-        break;
-    }
-}
-class SetTreeModule_SetIterator$1 extends Record {
-    stack;
-    started;
-    constructor(stack, started) {
-        super();
-        this.stack = stack;
-        this.started = started;
-    }
-}
-function SetTreeModule_collapseLHS(stack_mut) {
-    SetTreeModule_collapseLHS: while (true) {
-        const stack = stack_mut;
-        if (!isEmpty(stack)) {
-            const x = head(stack);
-            const rest = tail(stack);
-            if (x != null) {
-                const x2 = value(x);
-                if (x2 instanceof SetTreeNode$1) {
-                    const xn = x2;
-                    stack_mut = ofArrayWithTail([SetTreeNode$1__get_Left(xn), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(xn)), SetTreeNode$1__get_Right(xn)], rest);
-                    continue SetTreeModule_collapseLHS;
-                }
-                else {
-                    return stack;
-                }
-            }
-            else {
-                stack_mut = rest;
-                continue SetTreeModule_collapseLHS;
-            }
-        }
-        else {
-            return empty$1();
-        }
-    }
-}
-function SetTreeModule_mkIterator(s) {
-    return new SetTreeModule_SetIterator$1(SetTreeModule_collapseLHS(singleton$1(s)), false);
-}
-function SetTreeModule_notStarted() {
-    throw new Exception("Enumeration not started");
-}
-function SetTreeModule_alreadyFinished() {
-    throw new Exception("Enumeration already started");
-}
-function SetTreeModule_current(i) {
-    if (i.started) {
-        const matchValue = i.stack;
-        if (isEmpty(matchValue)) {
-            return SetTreeModule_alreadyFinished();
-        }
-        else if (head(matchValue) != null) {
-            const t = value(head(matchValue));
-            return SetTreeLeaf$1__get_Key(t);
-        }
-        else {
-            throw new Exception("Please report error: Set iterator, unexpected stack for current");
-        }
-    }
-    else {
-        return SetTreeModule_notStarted();
-    }
-}
-function SetTreeModule_moveNext(i) {
-    if (i.started) {
-        const matchValue = i.stack;
-        if (!isEmpty(matchValue)) {
-            if (head(matchValue) != null) {
-                const t = value(head(matchValue));
-                if (t instanceof SetTreeNode$1) {
-                    throw new Exception("Please report error: Set iterator, unexpected stack for moveNext");
-                }
-                else {
-                    i.stack = SetTreeModule_collapseLHS(tail(matchValue));
-                    return !isEmpty(i.stack);
-                }
-            }
-            else {
-                throw new Exception("Please report error: Set iterator, unexpected stack for moveNext");
-            }
-        }
-        else {
-            return false;
-        }
-    }
-    else {
-        i.started = true;
-        return !isEmpty(i.stack);
-    }
-}
-function SetTreeModule_mkIEnumerator(s) {
-    let i = SetTreeModule_mkIterator(s);
-    return {
-        "System.Collections.Generic.IEnumerator`1.get_Current"() {
-            return SetTreeModule_current(i);
-        },
-        "System.Collections.IEnumerator.get_Current"() {
-            return SetTreeModule_current(i);
-        },
-        "System.Collections.IEnumerator.MoveNext"() {
-            return SetTreeModule_moveNext(i);
-        },
-        "System.Collections.IEnumerator.Reset"() {
-            i = SetTreeModule_mkIterator(s);
-        },
-        Dispose() {
-        },
-    };
-}
-/**
- * Set comparison.  Note this can be expensive.
- */
-function SetTreeModule_compareStacks(comparer_mut, l1_mut, l2_mut) {
-    SetTreeModule_compareStacks: while (true) {
-        const comparer = comparer_mut, l1 = l1_mut, l2 = l2_mut;
-        if (!isEmpty(l1)) {
-            if (!isEmpty(l2)) {
-                if (head(l2) != null) {
-                    if (head(l1) != null) {
-                        const x1_3 = value(head(l1));
-                        const x2_3 = value(head(l2));
-                        if (x1_3 instanceof SetTreeNode$1) {
-                            const x1n_2 = x1_3;
-                            if (SetTreeNode$1__get_Left(x1n_2) == null) {
-                                if (x2_3 instanceof SetTreeNode$1) {
-                                    const x2n_2 = x2_3;
-                                    if (SetTreeNode$1__get_Left(x2n_2) == null) {
-                                        const c = comparer.Compare(SetTreeLeaf$1__get_Key(x1n_2), SetTreeLeaf$1__get_Key(x2n_2)) | 0;
-                                        if (c !== 0) {
-                                            return c | 0;
-                                        }
-                                        else {
-                                            comparer_mut = comparer;
-                                            l1_mut = cons(SetTreeNode$1__get_Right(x1n_2), tail(l1));
-                                            l2_mut = cons(SetTreeNode$1__get_Right(x2n_2), tail(l2));
-                                            continue SetTreeModule_compareStacks;
-                                        }
-                                    }
-                                    else {
-                                        let matchResult = undefined, t1_6 = undefined, x1_4 = undefined, t2_6 = undefined, x2_4 = undefined;
-                                        if (!isEmpty(l1)) {
-                                            if (head(l1) != null) {
-                                                matchResult = 0;
-                                                t1_6 = tail(l1);
-                                                x1_4 = value(head(l1));
-                                            }
-                                            else if (!isEmpty(l2)) {
-                                                if (head(l2) != null) {
-                                                    matchResult = 1;
-                                                    t2_6 = tail(l2);
-                                                    x2_4 = value(head(l2));
-                                                }
-                                                else {
-                                                    matchResult = 2;
-                                                }
-                                            }
-                                            else {
-                                                matchResult = 2;
-                                            }
-                                        }
-                                        else if (!isEmpty(l2)) {
-                                            if (head(l2) != null) {
-                                                matchResult = 1;
-                                                t2_6 = tail(l2);
-                                                x2_4 = value(head(l2));
-                                            }
-                                            else {
-                                                matchResult = 2;
-                                            }
-                                        }
-                                        else {
-                                            matchResult = 2;
-                                        }
-                                        switch (matchResult) {
-                                            case 0:
-                                                if (x1_4 instanceof SetTreeNode$1) {
-                                                    const x1n_3 = x1_4;
-                                                    comparer_mut = comparer;
-                                                    l1_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x1n_3), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x1n_3), SetTreeModule_empty(), SetTreeNode$1__get_Right(x1n_3), 0)], t1_6);
-                                                    l2_mut = l2;
-                                                    continue SetTreeModule_compareStacks;
-                                                }
-                                                else {
-                                                    comparer_mut = comparer;
-                                                    l1_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x1_4))], t1_6);
-                                                    l2_mut = l2;
-                                                    continue SetTreeModule_compareStacks;
-                                                }
-                                            case 1:
-                                                if (x2_4 instanceof SetTreeNode$1) {
-                                                    const x2n_3 = x2_4;
-                                                    comparer_mut = comparer;
-                                                    l1_mut = l1;
-                                                    l2_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x2n_3), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x2n_3), SetTreeModule_empty(), SetTreeNode$1__get_Right(x2n_3), 0)], t2_6);
-                                                    continue SetTreeModule_compareStacks;
-                                                }
-                                                else {
-                                                    comparer_mut = comparer;
-                                                    l1_mut = l1;
-                                                    l2_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x2_4))], t2_6);
-                                                    continue SetTreeModule_compareStacks;
-                                                }
-                                            default:
-                                                throw new Exception("unexpected state in SetTree.compareStacks");
-                                        }
-                                    }
-                                }
-                                else {
-                                    const c_1 = comparer.Compare(SetTreeLeaf$1__get_Key(x1n_2), SetTreeLeaf$1__get_Key(x2_3)) | 0;
-                                    if (c_1 !== 0) {
-                                        return c_1 | 0;
-                                    }
-                                    else {
-                                        comparer_mut = comparer;
-                                        l1_mut = cons(SetTreeNode$1__get_Right(x1n_2), tail(l1));
-                                        l2_mut = cons(SetTreeModule_empty(), tail(l2));
-                                        continue SetTreeModule_compareStacks;
-                                    }
-                                }
-                            }
-                            else {
-                                let matchResult_1 = undefined, t1_7 = undefined, x1_5 = undefined, t2_7 = undefined, x2_5 = undefined;
-                                if (!isEmpty(l1)) {
-                                    if (head(l1) != null) {
-                                        matchResult_1 = 0;
-                                        t1_7 = tail(l1);
-                                        x1_5 = value(head(l1));
-                                    }
-                                    else if (!isEmpty(l2)) {
-                                        if (head(l2) != null) {
-                                            matchResult_1 = 1;
-                                            t2_7 = tail(l2);
-                                            x2_5 = value(head(l2));
-                                        }
-                                        else {
-                                            matchResult_1 = 2;
-                                        }
-                                    }
-                                    else {
-                                        matchResult_1 = 2;
-                                    }
-                                }
-                                else if (!isEmpty(l2)) {
-                                    if (head(l2) != null) {
-                                        matchResult_1 = 1;
-                                        t2_7 = tail(l2);
-                                        x2_5 = value(head(l2));
-                                    }
-                                    else {
-                                        matchResult_1 = 2;
-                                    }
-                                }
-                                else {
-                                    matchResult_1 = 2;
-                                }
-                                switch (matchResult_1) {
-                                    case 0:
-                                        if (x1_5 instanceof SetTreeNode$1) {
-                                            const x1n_4 = x1_5;
-                                            comparer_mut = comparer;
-                                            l1_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x1n_4), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x1n_4), SetTreeModule_empty(), SetTreeNode$1__get_Right(x1n_4), 0)], t1_7);
-                                            l2_mut = l2;
-                                            continue SetTreeModule_compareStacks;
-                                        }
-                                        else {
-                                            comparer_mut = comparer;
-                                            l1_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x1_5))], t1_7);
-                                            l2_mut = l2;
-                                            continue SetTreeModule_compareStacks;
-                                        }
-                                    case 1:
-                                        if (x2_5 instanceof SetTreeNode$1) {
-                                            const x2n_4 = x2_5;
-                                            comparer_mut = comparer;
-                                            l1_mut = l1;
-                                            l2_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x2n_4), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x2n_4), SetTreeModule_empty(), SetTreeNode$1__get_Right(x2n_4), 0)], t2_7);
-                                            continue SetTreeModule_compareStacks;
-                                        }
-                                        else {
-                                            comparer_mut = comparer;
-                                            l1_mut = l1;
-                                            l2_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x2_5))], t2_7);
-                                            continue SetTreeModule_compareStacks;
-                                        }
-                                    default:
-                                        throw new Exception("unexpected state in SetTree.compareStacks");
-                                }
-                            }
-                        }
-                        else if (x2_3 instanceof SetTreeNode$1) {
-                            const x2n_5 = x2_3;
-                            if (SetTreeNode$1__get_Left(x2n_5) == null) {
-                                const c_2 = comparer.Compare(SetTreeLeaf$1__get_Key(x1_3), SetTreeLeaf$1__get_Key(x2n_5)) | 0;
-                                if (c_2 !== 0) {
-                                    return c_2 | 0;
-                                }
-                                else {
-                                    comparer_mut = comparer;
-                                    l1_mut = cons(SetTreeModule_empty(), tail(l1));
-                                    l2_mut = cons(SetTreeNode$1__get_Right(x2n_5), tail(l2));
-                                    continue SetTreeModule_compareStacks;
-                                }
-                            }
-                            else {
-                                let matchResult_2 = undefined, t1_8 = undefined, x1_6 = undefined, t2_8 = undefined, x2_6 = undefined;
-                                if (!isEmpty(l1)) {
-                                    if (head(l1) != null) {
-                                        matchResult_2 = 0;
-                                        t1_8 = tail(l1);
-                                        x1_6 = value(head(l1));
-                                    }
-                                    else if (!isEmpty(l2)) {
-                                        if (head(l2) != null) {
-                                            matchResult_2 = 1;
-                                            t2_8 = tail(l2);
-                                            x2_6 = value(head(l2));
-                                        }
-                                        else {
-                                            matchResult_2 = 2;
-                                        }
-                                    }
-                                    else {
-                                        matchResult_2 = 2;
-                                    }
-                                }
-                                else if (!isEmpty(l2)) {
-                                    if (head(l2) != null) {
-                                        matchResult_2 = 1;
-                                        t2_8 = tail(l2);
-                                        x2_6 = value(head(l2));
-                                    }
-                                    else {
-                                        matchResult_2 = 2;
-                                    }
-                                }
-                                else {
-                                    matchResult_2 = 2;
-                                }
-                                switch (matchResult_2) {
-                                    case 0:
-                                        if (x1_6 instanceof SetTreeNode$1) {
-                                            const x1n_5 = x1_6;
-                                            comparer_mut = comparer;
-                                            l1_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x1n_5), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x1n_5), SetTreeModule_empty(), SetTreeNode$1__get_Right(x1n_5), 0)], t1_8);
-                                            l2_mut = l2;
-                                            continue SetTreeModule_compareStacks;
-                                        }
-                                        else {
-                                            comparer_mut = comparer;
-                                            l1_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x1_6))], t1_8);
-                                            l2_mut = l2;
-                                            continue SetTreeModule_compareStacks;
-                                        }
-                                    case 1:
-                                        if (x2_6 instanceof SetTreeNode$1) {
-                                            const x2n_6 = x2_6;
-                                            comparer_mut = comparer;
-                                            l1_mut = l1;
-                                            l2_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x2n_6), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x2n_6), SetTreeModule_empty(), SetTreeNode$1__get_Right(x2n_6), 0)], t2_8);
-                                            continue SetTreeModule_compareStacks;
-                                        }
-                                        else {
-                                            comparer_mut = comparer;
-                                            l1_mut = l1;
-                                            l2_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x2_6))], t2_8);
-                                            continue SetTreeModule_compareStacks;
-                                        }
-                                    default:
-                                        throw new Exception("unexpected state in SetTree.compareStacks");
-                                }
-                            }
-                        }
-                        else {
-                            const c_3 = comparer.Compare(SetTreeLeaf$1__get_Key(x1_3), SetTreeLeaf$1__get_Key(x2_3)) | 0;
-                            if (c_3 !== 0) {
-                                return c_3 | 0;
-                            }
-                            else {
-                                comparer_mut = comparer;
-                                l1_mut = tail(l1);
-                                l2_mut = tail(l2);
-                                continue SetTreeModule_compareStacks;
-                            }
-                        }
-                    }
-                    else {
-                        value(head(l2));
-                        let matchResult_3 = undefined, t1_2 = undefined, x1 = undefined, t2_2 = undefined, x2_1 = undefined;
-                        if (!isEmpty(l1)) {
-                            if (head(l1) != null) {
-                                matchResult_3 = 0;
-                                t1_2 = tail(l1);
-                                x1 = value(head(l1));
-                            }
-                            else if (!isEmpty(l2)) {
-                                if (head(l2) != null) {
-                                    matchResult_3 = 1;
-                                    t2_2 = tail(l2);
-                                    x2_1 = value(head(l2));
-                                }
-                                else {
-                                    matchResult_3 = 2;
-                                }
-                            }
-                            else {
-                                matchResult_3 = 2;
-                            }
-                        }
-                        else if (!isEmpty(l2)) {
-                            if (head(l2) != null) {
-                                matchResult_3 = 1;
-                                t2_2 = tail(l2);
-                                x2_1 = value(head(l2));
-                            }
-                            else {
-                                matchResult_3 = 2;
-                            }
-                        }
-                        else {
-                            matchResult_3 = 2;
-                        }
-                        switch (matchResult_3) {
-                            case 0:
-                                if (x1 instanceof SetTreeNode$1) {
-                                    const x1n = x1;
-                                    comparer_mut = comparer;
-                                    l1_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x1n), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x1n), SetTreeModule_empty(), SetTreeNode$1__get_Right(x1n), 0)], t1_2);
-                                    l2_mut = l2;
-                                    continue SetTreeModule_compareStacks;
-                                }
-                                else {
-                                    comparer_mut = comparer;
-                                    l1_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x1))], t1_2);
-                                    l2_mut = l2;
-                                    continue SetTreeModule_compareStacks;
-                                }
-                            case 1:
-                                if (x2_1 instanceof SetTreeNode$1) {
-                                    const x2n = x2_1;
-                                    comparer_mut = comparer;
-                                    l1_mut = l1;
-                                    l2_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x2n), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x2n), SetTreeModule_empty(), SetTreeNode$1__get_Right(x2n), 0)], t2_2);
-                                    continue SetTreeModule_compareStacks;
-                                }
-                                else {
-                                    comparer_mut = comparer;
-                                    l1_mut = l1;
-                                    l2_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x2_1))], t2_2);
-                                    continue SetTreeModule_compareStacks;
-                                }
-                            default:
-                                throw new Exception("unexpected state in SetTree.compareStacks");
-                        }
-                    }
-                }
-                else if (head(l1) != null) {
-                    value(head(l1));
-                    let matchResult_4 = undefined, t1_4 = undefined, x1_2 = undefined, t2_4 = undefined, x2_2 = undefined;
-                    if (!isEmpty(l1)) {
-                        if (head(l1) != null) {
-                            matchResult_4 = 0;
-                            t1_4 = tail(l1);
-                            x1_2 = value(head(l1));
-                        }
-                        else if (!isEmpty(l2)) {
-                            if (head(l2) != null) {
-                                matchResult_4 = 1;
-                                t2_4 = tail(l2);
-                                x2_2 = value(head(l2));
-                            }
-                            else {
-                                matchResult_4 = 2;
-                            }
-                        }
-                        else {
-                            matchResult_4 = 2;
-                        }
-                    }
-                    else if (!isEmpty(l2)) {
-                        if (head(l2) != null) {
-                            matchResult_4 = 1;
-                            t2_4 = tail(l2);
-                            x2_2 = value(head(l2));
-                        }
-                        else {
-                            matchResult_4 = 2;
-                        }
-                    }
-                    else {
-                        matchResult_4 = 2;
-                    }
-                    switch (matchResult_4) {
-                        case 0:
-                            if (x1_2 instanceof SetTreeNode$1) {
-                                const x1n_1 = x1_2;
-                                comparer_mut = comparer;
-                                l1_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x1n_1), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x1n_1), SetTreeModule_empty(), SetTreeNode$1__get_Right(x1n_1), 0)], t1_4);
-                                l2_mut = l2;
-                                continue SetTreeModule_compareStacks;
-                            }
-                            else {
-                                comparer_mut = comparer;
-                                l1_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x1_2))], t1_4);
-                                l2_mut = l2;
-                                continue SetTreeModule_compareStacks;
-                            }
-                        case 1:
-                            if (x2_2 instanceof SetTreeNode$1) {
-                                const x2n_1 = x2_2;
-                                comparer_mut = comparer;
-                                l1_mut = l1;
-                                l2_mut = ofArrayWithTail([SetTreeNode$1__get_Left(x2n_1), SetTreeNode$1_$ctor_5F465FC9(SetTreeLeaf$1__get_Key(x2n_1), SetTreeModule_empty(), SetTreeNode$1__get_Right(x2n_1), 0)], t2_4);
-                                continue SetTreeModule_compareStacks;
-                            }
-                            else {
-                                comparer_mut = comparer;
-                                l1_mut = l1;
-                                l2_mut = ofArrayWithTail([SetTreeModule_empty(), SetTreeLeaf$1_$ctor_2B595(SetTreeLeaf$1__get_Key(x2_2))], t2_4);
-                                continue SetTreeModule_compareStacks;
-                            }
-                        default:
-                            throw new Exception("unexpected state in SetTree.compareStacks");
-                    }
-                }
-                else {
-                    comparer_mut = comparer;
-                    l1_mut = tail(l1);
-                    l2_mut = tail(l2);
-                    continue SetTreeModule_compareStacks;
-                }
-            }
-            else {
-                return 1;
-            }
-        }
-        else if (isEmpty(l2)) {
-            return 0;
-        }
-        else {
-            return -1;
-        }
-    }
-}
-function SetTreeModule_compare(comparer, t1, t2) {
-    if (t1 == null) {
-        if (t2 == null) {
-            return 0;
-        }
-        else {
-            return -1;
-        }
-    }
-    else if (t2 == null) {
-        return 1;
-    }
-    else {
-        return SetTreeModule_compareStacks(comparer, singleton$1(t1), singleton$1(t2)) | 0;
-    }
-}
-function SetTreeModule_copyToArray(s, arr, i) {
-    let j = i;
-    SetTreeModule_iter((x) => {
-        setItem(arr, j, x);
-        j = ((j + 1) | 0);
-    }, s);
-}
-function SetTreeModule_mkFromEnumerator(comparer_mut, acc_mut, e_mut) {
-    SetTreeModule_mkFromEnumerator: while (true) {
-        const comparer = comparer_mut, acc = acc_mut, e = e_mut;
-        if (e["System.Collections.IEnumerator.MoveNext"]()) {
-            comparer_mut = comparer;
-            acc_mut = SetTreeModule_add(comparer, e["System.Collections.Generic.IEnumerator`1.get_Current"](), acc);
-            e_mut = e;
-            continue SetTreeModule_mkFromEnumerator;
-        }
-        else {
-            return acc;
-        }
-    }
-}
-function SetTreeModule_ofArray(comparer, l) {
-    return fold$3((acc, k) => SetTreeModule_add(comparer, k, acc), SetTreeModule_empty(), l);
-}
-function SetTreeModule_ofList(comparer, l) {
-    return fold$1((acc, k) => SetTreeModule_add(comparer, k, acc), SetTreeModule_empty(), l);
-}
-function SetTreeModule_ofSeq(comparer, c) {
-    if (isArrayLike(c)) {
-        return SetTreeModule_ofArray(comparer, c);
-    }
-    else if (c instanceof FSharpList) {
-        return SetTreeModule_ofList(comparer, c);
-    }
-    else {
-        const ie = getEnumerator(c);
-        try {
-            return SetTreeModule_mkFromEnumerator(comparer, SetTreeModule_empty(), ie);
-        }
-        finally {
-            disposeSafe(ie);
-        }
-    }
-}
-class FSharpSet {
-    tree;
-    comparer;
-    constructor(comparer, tree) {
-        this.comparer = comparer;
-        this.tree = tree;
-    }
-    GetHashCode() {
-        const this$ = this;
-        return FSharpSet__ComputeHashCode(this$) | 0;
-    }
-    Equals(other) {
-        let that = undefined;
-        const this$ = this;
-        return (other instanceof FSharpSet) && ((that = other, SetTreeModule_compare(FSharpSet__get_Comparer(this$), FSharpSet__get_Tree(this$), FSharpSet__get_Tree(that)) === 0));
-    }
-    toString() {
-        const this$ = this;
-        let result = "set [";
-        let first = true;
-        const enumerator = getEnumerator(this$);
-        try {
-            while (enumerator["System.Collections.IEnumerator.MoveNext"]()) {
-                let x = undefined, matchValue = undefined, s = undefined;
-                const x_1 = enumerator["System.Collections.Generic.IEnumerator`1.get_Current"]();
-                result = ((first ? result : (result + "; ")) + ((x = x_1, (matchValue = x, (typeof matchValue === "string") ? ((s = matchValue, ("\"" + s) + "\"")) : toString$2(x)))));
-                first = false;
-            }
-        }
-        finally {
-            disposeSafe(enumerator);
-        }
-        return result + "]";
-    }
-    get [Symbol.toStringTag]() {
-        return "FSharpSet";
-    }
-    toJSON() {
-        const this$ = this;
-        return Array.from(this$);
-    }
-    CompareTo(other) {
-        let that = undefined;
-        const this$ = this;
-        return ((other instanceof FSharpSet) ? ((that = other, SetTreeModule_compare(FSharpSet__get_Comparer(this$), FSharpSet__get_Tree(this$), FSharpSet__get_Tree(that)))) : 1) | 0;
-    }
-    "System.Collections.Generic.ICollection`1.Add2B595"(x) {
-        throw NotSupportedException_$ctor_Z721C83C5("ReadOnlyCollection");
-    }
-    "System.Collections.Generic.ICollection`1.Clear"() {
-        throw NotSupportedException_$ctor_Z721C83C5("ReadOnlyCollection");
-    }
-    "System.Collections.Generic.ICollection`1.Remove2B595"(x) {
-        throw NotSupportedException_$ctor_Z721C83C5("ReadOnlyCollection");
-    }
-    "System.Collections.Generic.ICollection`1.Contains2B595"(x) {
-        const s = this;
-        return SetTreeModule_mem(FSharpSet__get_Comparer(s), x, FSharpSet__get_Tree(s));
-    }
-    "System.Collections.Generic.ICollection`1.CopyToZ3B4C077E"(arr, i) {
-        const s = this;
-        SetTreeModule_copyToArray(FSharpSet__get_Tree(s), arr, i);
-    }
-    "System.Collections.Generic.ICollection`1.get_IsReadOnly"() {
-        return true;
-    }
-    "System.Collections.Generic.ICollection`1.get_Count"() {
-        const s = this;
-        return FSharpSet__get_Count(s) | 0;
-    }
-    "System.Collections.Generic.IReadOnlyCollection`1.get_Count"() {
-        const s = this;
-        return FSharpSet__get_Count(s) | 0;
-    }
-    GetEnumerator() {
-        const s = this;
-        return SetTreeModule_mkIEnumerator(FSharpSet__get_Tree(s));
-    }
-    [Symbol.iterator]() {
-        return toIterator(getEnumerator(this));
-    }
-    "System.Collections.IEnumerable.GetEnumerator"() {
-        const s = this;
-        return SetTreeModule_mkIEnumerator(FSharpSet__get_Tree(s));
-    }
-    get size() {
-        const s = this;
-        return FSharpSet__get_Count(s) | 0;
-    }
-    add(k) {
-        throw new Exception("Set cannot be mutated");
-    }
-    clear() {
-        throw new Exception("Set cannot be mutated");
-    }
-    delete(k) {
-        throw new Exception("Set cannot be mutated");
-    }
-    has(k) {
-        const s = this;
-        return FSharpSet__Contains(s, k);
-    }
-    keys() {
-        const s = this;
-        return map$1((x) => x, s);
-    }
-    values() {
-        const s = this;
-        return map$1((x) => x, s);
-    }
-    entries() {
-        const s = this;
-        return map$1((v) => [v, v], s);
-    }
-    forEach(f, thisArg) {
-        const s = this;
-        iterate((x) => {
-            f(x, x, s);
-        }, s);
-    }
-}
-function FSharpSet_$ctor(comparer, tree) {
-    return new FSharpSet(comparer, tree);
-}
-function FSharpSet__get_Comparer(set$) {
-    return set$.comparer;
-}
-function FSharpSet__get_Tree(set$) {
-    return set$.tree;
-}
-function FSharpSet__get_Count(s) {
-    return SetTreeModule_count(FSharpSet__get_Tree(s)) | 0;
-}
-function FSharpSet__Contains(s, value) {
-    return SetTreeModule_mem(FSharpSet__get_Comparer(s), value, FSharpSet__get_Tree(s));
-}
-function FSharpSet__ComputeHashCode(this$) {
-    let res = 0;
-    const enumerator = getEnumerator(this$);
-    try {
-        while (enumerator["System.Collections.IEnumerator.MoveNext"]()) {
-            const x_1 = enumerator["System.Collections.Generic.IEnumerator`1.get_Current"]();
-            res = ((((res << 1) + structuralHash(x_1)) + 631) | 0);
-        }
-    }
-    finally {
-        disposeSafe(enumerator);
-    }
-    return Math.abs(res) | 0;
-}
-function ofSeq(elements, comparer) {
-    return FSharpSet_$ctor(comparer, SetTreeModule_ofSeq(comparer, elements));
-}
-
-const UriKind = {
-    RelativeOrAbsolute: 0,
-    Absolute: 1,
-    Relative: 2,
-};
-const ok = (value) => ({
-    tag: "ok",
-    value,
-});
-const error = (error) => ({ tag: "error", error });
-class Uri {
-    uri;
-    constructor(state) {
-        this.uri = state;
-    }
-    static isAbsoluteUri(uri) {
-        try {
-            new URL(uri);
-            return true;
-        }
-        catch {
-            return false;
-        }
-    }
-    static tryCreateWithKind(uri, kind) {
-        switch (kind) {
-            case UriKind.Absolute:
-                return Uri.isAbsoluteUri(uri)
-                    ? ok(new Uri({ original: uri, value: new URL(uri), kind }))
-                    : error("Invalid URI: The format of the URI could not be determined.");
-            case UriKind.Relative:
-                return Uri.isAbsoluteUri(uri)
-                    ? error("URI is not a relative path.")
-                    : ok(new Uri({ original: uri, value: uri, kind }));
-            case UriKind.RelativeOrAbsolute:
-                return Uri.isAbsoluteUri(uri)
-                    ? ok(new Uri({ original: uri, value: new URL(uri), kind: UriKind.Absolute }))
-                    : ok(new Uri({ original: uri, value: uri, kind: UriKind.Relative }));
-            default:
-                const never = kind;
-                return never;
-        }
-    }
-    static tryCreateWithBase(baseUri, relativeUri) {
-        return baseUri.uri.kind !== UriKind.Absolute
-            ? error("Base URI should have Absolute kind")
-            : typeof relativeUri === "string"
-                ? ok(new Uri({
-                    original: new URL(relativeUri, baseUri.uri.value).toString(),
-                    value: new URL(relativeUri, baseUri.uri.value),
-                    kind: UriKind.Absolute,
-                }))
-                : relativeUri.uri.kind === UriKind.Relative
-                    ? ok(new Uri({
-                        original: new URL(relativeUri.uri.value, baseUri.uri.value).toString(),
-                        value: new URL(relativeUri.uri.value, baseUri.uri.value),
-                        kind: UriKind.Absolute,
-                    }))
-                    : ok(baseUri);
-    }
-    static tryCreateImpl(value, kindOrUri = UriKind.Absolute) {
-        return typeof value === "string"
-            ? typeof kindOrUri !== "number"
-                ? error("Kind must be specified when the baseUri is a string.")
-                : Uri.tryCreateWithKind(value, kindOrUri)
-            : typeof kindOrUri === "number"
-                ? error("Kind should not be specified when the baseUri is an absolute Uri.")
-                : Uri.tryCreateWithBase(value, kindOrUri);
-    }
-    static create(value, kindOrUri = UriKind.Absolute) {
-        const result = Uri.tryCreateImpl(value, kindOrUri);
-        switch (result.tag) {
-            case "ok":
-                return result.value;
-            case "error":
-                throw new Exception(result.error);
-            default:
-                const never = result;
-                return never;
-        }
-    }
-    static tryCreate(value, kindOrUri = UriKind.Absolute, out) {
-        const result = Uri.tryCreateImpl(value, kindOrUri);
-        switch (result.tag) {
-            case "ok":
-                out.contents = result.value;
-                return true;
-            case "error":
-                return false;
-            default:
-                const never = result;
-                return never;
-        }
-    }
-    toString() {
-        switch (this.uri.kind) {
-            case UriKind.Absolute:
-                return decodeURIComponent(this.asUrl().toString());
-            case UriKind.Relative:
-                return this.uri.value;
-            default:
-                const never = this.uri;
-                return never;
-        }
-    }
-    asUrl() {
-        switch (this.uri.kind) {
-            case UriKind.Absolute:
-                return this.uri.value;
-            case UriKind.Relative:
-                throw new Exception("This operation is not supported for a relative URI.");
-            default:
-                const never = this.uri;
-                return never;
-        }
-    }
-    get isAbsoluteUri() {
-        return this.uri.kind === UriKind.Absolute;
-    }
-    get absoluteUri() {
-        return this.asUrl().href;
-    }
-    get scheme() {
-        const protocol = this.asUrl().protocol;
-        return protocol.slice(0, protocol.length - 1);
-    }
-    get host() {
-        const host = this.asUrl().host;
-        if (host.includes(":")) {
-            return host.split(":")[0];
-        }
-        else {
-            return host;
-        }
-    }
-    get absolutePath() {
-        return this.asUrl().pathname;
-    }
-    get query() {
-        return this.asUrl().search;
-    }
-    get isDefaultPort() {
-        return this.port === 80;
-    }
-    get port() {
-        const port = this.asUrl().port;
-        if (port === "") {
-            return 80;
-        }
-        else {
-            return parseInt(port);
-        }
-    }
-    get pathAndQuery() {
-        const url = this.asUrl();
-        return url.pathname + url.search;
-    }
-    get fragment() {
-        return this.asUrl().hash;
-    }
-    get originalString() {
-        return this.uri.original;
-    }
-}
-
 function distinct(xs, comparer) {
     return delay(() => {
         const hashSet = new HashSet([], comparer);
@@ -36748,9 +35644,6 @@ class Eligibility extends Union {
     }
     static Eligible = new Eligibility(0, []);
 }
-const EligibilityModule_publicNuGetHosts = ofSeq(["api.nuget.org", "www.nuget.org", "nuget.org"], {
-    Compare: (x, y) => (comparePrimitives(x, y) | 0),
-});
 function EligibilityModule_isCommentOrEmpty(line) {
     const value = line.trim();
     if (isNullOrWhiteSpace(value)) {
@@ -36761,42 +35654,17 @@ function EligibilityModule_isCommentOrEmpty(line) {
     }
 }
 function EligibilityModule_sourceReason(line) {
-    let uri = undefined;
-    const value = trim(substring(line.trim(), "source ".length).trim(), "\"");
-    let hasUserInfo;
-    const schemeSeparator = indexOf(value, "://") | 0;
-    if (schemeSeparator < 0) {
-        hasUserInfo = false;
+    const raw = substring(line.trim(), "source ".length).trim();
+    if ((compare((((raw.length >= 2) && (raw[0] === "\"")) && (raw[raw.length - 1] === "\"")) ? substring(raw, 1, raw.length - 2) : raw, "https://api.nuget.org/v3/index.json", 4) === 0) && !((raw.indexOf("\"") >= 0) && !(raw.startsWith("\"") && raw.endsWith("\"")))) {
+        return undefined;
     }
     else {
-        const authorityStart = (schemeSeparator + 3) | 0;
-        const pathStart = value.indexOf("/", authorityStart) | 0;
-        const authority = (pathStart < 0) ? substring(value, authorityStart) : substring(value, authorityStart, pathStart - authorityStart);
-        hasUserInfo = (authority.indexOf("@") >= 0);
+        return concat$1("unsupported package source; V1 requires `source ", "https://api.nuget.org/v3/index.json", "`");
     }
-    let matchValue;
-    let outArg = defaultOf();
-    matchValue = [Uri.tryCreate(value, 1, new FSharpRef(() => outArg, (v) => {
-            outArg = v;
-        })), outArg];
-    let matchResult = undefined;
-    if (matchValue[0]) {
-        if ((uri = matchValue[1], ((uri.scheme === "https") && FSharpSet__Contains(EligibilityModule_publicNuGetHosts, uri.host.toLowerCase())) && !hasUserInfo)) {
-            matchResult = 0;
-        }
-        else {
-            matchResult = 1;
-        }
-    }
-    else {
-        matchResult = 1;
-    }
-    switch (matchResult) {
-        case 0:
-            return undefined;
-        default:
-            return concat$1("unsupported package source: ", value);
-    }
+}
+function EligibilityModule_directiveName(value) {
+    const _arg = defaultArg(tryHead(split(value, [" ", "\t"], undefined, 1)), "unknown");
+    return _arg.toLowerCase();
 }
 function EligibilityModule_unsupportedReason(line) {
     const value = line.trim();
@@ -36805,7 +35673,7 @@ function EligibilityModule_unsupportedReason(line) {
         return EligibilityModule_sourceReason(value);
     }
     else if (exists((value_1) => lower.startsWith(value_1), ofArray$1(["git ", "github ", "http ", "file ", "cache ", "credentials ", "username ", "password "]))) {
-        return concat$1("unsupported Paket directive: ", value);
+        return concat$1("unsupported Paket directive: ", EligibilityModule_directiveName(value));
     }
     else {
         return undefined;
@@ -36814,8 +35682,9 @@ function EligibilityModule_unsupportedReason(line) {
 /**
  * Validate the deliberately narrow credential-free runner policy for Paket inputs.
  *
- * decision: v1 accepts only HTTPS NuGet.org sources so the runner never needs package-source credentials
- * invariant: every non-comment source directive resolves to a public NuGet.org host without user information
+ * decision: v1 accepts only the canonical HTTPS NuGet.org v3 index so source validation cannot be bypassed with alternate paths
+ * invariant: every non-comment source directive is the credential-free api.nuget.org v3 index without query or fragment data
+ * tradeoff: rejects other public NuGet.org endpoints to keep the pre-execution network policy exact and reviewable
  */
 function EligibilityModule_inspect(dependencies) {
     let lines;
@@ -36962,10 +35831,10 @@ class PaketResolver {
         })), () => {
             const dependenciesPath = join$1(_.workspace, "paket.dependencies");
             const lockPath = join$1(_.workspace, "paket.lock");
-            return singleton.Bind(awaitPromise(readFile(dependenciesPath, "utf8")), (_arg_1) => {
+            return singleton.Bind(PaketResolver__readRepositoryFile(_, dependenciesPath, "paket.dependencies", 1048576), (_arg_1) => {
                 const matchValue = EligibilityModule_inspect(_arg_1);
                 if (matchValue.tag === /* Eligible */ 0) {
-                    return singleton.Bind(awaitPromise(readFile(lockPath, "utf8")), (_arg_2) => {
+                    return singleton.Bind(PaketResolver__readRepositoryFile(_, lockPath, "paket.lock", 8388608), (_arg_2) => {
                         const previous = _arg_2;
                         const options = {
                             cwd: _.workspace,
@@ -36982,13 +35851,10 @@ class PaketResolver {
                             timeout: 540000,
                             maxBuffer: 1048576,
                         };
-                        return singleton.Bind(awaitPromise(execFile(_.executable, ["update", "--no-install"], options)), (_arg_3) => {
-                            const stderr = _arg_3[1];
-                            return singleton.Bind(awaitPromise(readFile(lockPath, "utf8")), (_arg_4) => {
-                                const current = _arg_4;
-                                return (current === previous) ? singleton.Return(new ResolutionResult(ResolutionStatus.NoChange, undefined, empty$1(), empty$1(), empty$1())) : singleton.Return(new ResolutionResult(ResolutionStatus.Updated, current, changes(previous, current), requirementChanges(previous, current), isNullOrWhiteSpace(stderr) ? empty$1() : singleton$1(stderr.trim())));
-                            });
-                        });
+                        return singleton.Bind(awaitPromise(execFile(_.executable, ["update", "--no-install"], options)), (_arg_3) => singleton.Bind(PaketResolver__readRepositoryFile(_, lockPath, "paket.lock", 8388608), (_arg_4) => {
+                            const current = _arg_4;
+                            return (current === previous) ? singleton.Return(new ResolutionResult(ResolutionStatus.NoChange, undefined, empty$1(), empty$1(), empty$1())) : singleton.Return(new ResolutionResult(ResolutionStatus.Updated, current, changes(previous, current), requirementChanges(previous, current), empty$1()));
+                        }));
                     });
                 }
                 else {
@@ -37002,31 +35868,82 @@ class PaketResolver {
 function PaketResolver_$ctor_30230F9B(workspace, executable, isolatedHome) {
     return new PaketResolver(workspace, executable, isolatedHome);
 }
+function PaketResolver__readRepositoryFile(this$, path, description, maximumBytes) {
+    return singleton.Delay(() => singleton.Bind(awaitPromise(lstat$1(path)), (_arg) => {
+        const stats = _arg;
+        const matchValue = PaketFiles_validateInput(description, maximumBytes, stats.size, stats.isFile(), stats.isSymbolicLink());
+        if (matchValue.tag === /* Ok */ 0) {
+            return singleton.ReturnFrom(awaitPromise(readFile(path, "utf8")));
+        }
+        else {
+            const message = matchValue.fields[0];
+            return singleton.Return((() => {
+                throw new Exception(message);
+            })());
+        }
+    }));
+}
 
+function PullRequestBody_cell(value) {
+    return replace(replace(replace(replace((value.length > 120) ? (substring(value, 0, 120) + "…") : value, "|", "¦"), "`", "ˋ"), "\r", " "), "\n", " ");
+}
+function PullRequestBody_truncationNote(actualCount) {
+    if (actualCount > 50) {
+        return `
+
+The table is limited to the first ${50} of ${actualCount} detected changes.`;
+    }
+    else {
+        return "";
+    }
+}
 /**
  * Describe the observable lock-file change without inventing package upgrades.
  *
  * decision: reports dependency requirements separately because they can change without upgrading resolved packages
  * invariant: an empty resolved-version diff never claims that package versions were updated
+ * decision: bounds and neutralizes lock-derived table cells because package metadata is untrusted Markdown input
+ * invariant: each table contains at most 50 rows and each input cell is truncated to 120 characters before rendering
  */
 function PullRequestBody_render(changes, requirementChanges) {
+    let requirementChanges_3 = undefined;
     if (isEmpty(changes)) {
         if (isEmpty(requirementChanges)) {
             return concat$1("<!-- paketabot:weekly -->", "\nPaket refreshed `paket.lock` without changing resolved package versions.\n\nNo resolved version or dependency-requirement change could be summarized from the lock file.\n\nGenerated by PaketaBot. Repository CI remains responsible for validation.\n");
         }
         else {
-            return concat$1("<!-- paketabot:weekly -->", "\nPaket refreshed dependency requirements recorded in `paket.lock` without changing resolved package versions.\n\n| Package | Required by | From | To |\n|---|---|---:|---:|\n", join("\n", map((change) => (`| \`${change.Name}\` | \`${change.RequiredBy}\` | \`${change.Previous}\` | \`${change.Current}\` |`), requirementChanges)), "\n\nGenerated by PaketaBot. Repository CI remains responsible for validation.\n");
+            const requirementChanges_1 = requirementChanges;
+            return `${"<!-- paketabot:weekly -->"}
+Paket refreshed dependency requirements recorded in \`paket.lock\` without changing resolved package versions.
+
+| Package | Required by | From | To |
+|---|---|---:|---:|
+${join("\n", map((change) => (`| \`${PullRequestBody_cell(change.Name)}\` | \`${PullRequestBody_cell(change.RequiredBy)}\` | \`${PullRequestBody_cell(change.Previous)}\` | \`${PullRequestBody_cell(change.Current)}\` |`), truncate(50, requirementChanges_1)))}
+${PullRequestBody_truncationNote(length(requirementChanges_1))}
+
+Generated by PaketaBot. Repository CI remains responsible for validation.
+`;
         }
     }
     else {
         const requirementChanges_2 = requirementChanges;
+        const changes_1 = changes;
         return `${"<!-- paketabot:weekly -->"}
 PaketaBot updated the versions allowed by \`paket.dependencies\`.
 
 | Package | From | To |
 |---|---:|---:|
-${join("\n", map((change_1) => (`| \`${change_1.Name}\` | \`${change_1.Previous}\` | \`${change_1.Current}\` |`), changes))}
-${isEmpty(requirementChanges_2) ? "" : concat$1("\n\nPaket also refreshed dependency requirements recorded in `paket.lock`.\n\n| Package | Required by | From | To |\n|---|---|---:|---:|\n", join("\n", map((change_2) => (`| \`${change_2.Name}\` | \`${change_2.RequiredBy}\` | \`${change_2.Previous}\` | \`${change_2.Current}\` |`), requirementChanges_2)), "\n")}
+${join("\n", map((change_1) => (`| \`${PullRequestBody_cell(change_1.Name)}\` | \`${PullRequestBody_cell(change_1.Previous)}\` | \`${PullRequestBody_cell(change_1.Current)}\` |`), truncate(50, changes_1)))}
+${PullRequestBody_truncationNote(length(changes_1))}
+${isEmpty(requirementChanges_2) ? "" : ((requirementChanges_3 = requirementChanges_2, `
+
+Paket also refreshed dependency requirements recorded in \`paket.lock\`.
+
+| Package | Required by | From | To |
+|---|---|---:|---:|
+${join("\n", map((change_2) => (`| \`${PullRequestBody_cell(change_2.Name)}\` | \`${PullRequestBody_cell(change_2.RequiredBy)}\` | \`${PullRequestBody_cell(change_2.Previous)}\` | \`${PullRequestBody_cell(change_2.Current)}\` |`), truncate(50, requirementChanges_3)))}
+${PullRequestBody_truncationNote(length(requirementChanges_3))}
+`))}
 
 Generated by PaketaBot. Repository CI remains responsible for validation.
 `;
@@ -37047,7 +35964,7 @@ function ResolveService_$ctor_F180EBC(resolver) {
  * invariant: resolver exceptions become typed failures that can cross the Actions artifact boundary
  */
 function ResolveService__Run(_) {
-    return singleton.Delay(() => singleton.TryWith(singleton.Delay(() => singleton.ReturnFrom(_.resolver.Resolve())), (_arg) => singleton.Return(new ResolutionResult(ResolutionStatus.Failed, undefined, empty$1(), empty$1(), singleton$1(_arg.message)))));
+    return singleton.Delay(() => singleton.TryWith(singleton.Delay(() => singleton.ReturnFrom(_.resolver.Resolve())), (_arg) => singleton.Return(new ResolutionResult(ResolutionStatus.Failed, undefined, empty$1(), empty$1(), singleton$1("Paket dependency resolution failed before producing a safe result.")))));
 }
 class PublishService {
     github;
@@ -37099,39 +36016,41 @@ function PublishService__Run_Z750F7FC2(_, repository, baseSha, result) {
                     return singleton.Bind(_.github.GetBranchHead(repository, "paketabot/weekly"), (_arg_1) => {
                         let option_1 = undefined;
                         const publish = new PublishUpdate(repository, baseSha, "paketabot/weekly", "paket.lock", lockFile, "chore(deps): update Paket dependencies", PullRequestBody_render(result.Changes, result.RequirementChanges));
-                        let publicationPlan;
                         const matchValue_3 = Branches_planPublication(baseSha, (option_1 = previousPublication, (option_1 != null) ? value(option_1).HeadSha : undefined), _arg_1);
-                        if (matchValue_3.tag === /* Error */ 1) {
-                            throw new Exception(matchValue_3.fields[0]);
+                        if (matchValue_3.tag === /* Ok */ 0) {
+                            const publicationPlan = matchValue_3.fields[0];
+                            const parentShas = Branches_commitParents(baseSha, publicationPlan);
+                            return singleton.Bind(_.github.CreateCommit(publish, parentShas), (_arg_3) => {
+                                let previous_1 = undefined;
+                                const commitSha = _arg_3;
+                                return (publicationPlan.tag === /* CreateFrom */ 0) ? singleton.Bind(_.github.CreateBranch(repository, publish.Branch, commitSha), () => singleton.Bind(PublishService__createPullRequestAfterBranchMutation(_, publish, commitSha), (_arg_9) => {
+                                    const result_2 = _arg_9;
+                                    return singleton.Return((result_2.tag === /* Error */ 1) ? UpdateOutcome_RunFailed(singleton$1(result_2.fields[0])) : UpdateOutcome_Published(result_2.fields[0]));
+                                })) : ((previousPublication == null) ? singleton.Return(UpdateOutcome_RunFailed(singleton$1("a verified branch head requires tracked publication state"))) : (value(previousPublication).IsOpen ? ((previous_1 = value(previousPublication), singleton.Bind(_.github.UpdatePullRequest(publish, previous_1.PullRequestNumber), () => singleton.Bind(_.github.FastForwardBranch(repository, publish.Branch, commitSha), () => singleton.Return(UpdateOutcome_Published(PublishService__publication(_, publish.Branch, previous_1.PullRequestNumber, commitSha))))))) : singleton.Bind(_.github.FastForwardBranch(repository, publish.Branch, commitSha), () => singleton.Bind(PublishService__createPullRequestAfterBranchMutation(_, publish, commitSha), (_arg_7) => {
+                                    const result_1 = _arg_7;
+                                    return singleton.Return((result_1.tag === /* Error */ 1) ? UpdateOutcome_RunFailed(singleton$1(result_1.fields[0])) : UpdateOutcome_Published(result_1.fields[0]));
+                                }))));
+                            });
                         }
                         else {
-                            publicationPlan = matchValue_3.fields[0];
+                            const message = matchValue_3.fields[0];
+                            return singleton.Return(UpdateOutcome_RunFailed(singleton$1(message)));
                         }
-                        const parentShas = Branches_commitParents(baseSha, publicationPlan);
-                        return singleton.Bind(_.github.CreateCommit(publish, parentShas), (_arg_3) => {
-                            let previous_1 = undefined;
-                            const commitSha = _arg_3;
-                            return (publicationPlan.tag === /* CreateFrom */ 0) ? singleton.Bind(_.github.CreateBranch(repository, publish.Branch, commitSha), () => singleton.Bind(PublishService__createPullRequestAfterBranchMutation(_, publish, commitSha), (_arg_9) => singleton.Return(UpdateOutcome_Published(_arg_9)))) : ((previousPublication == null) ? singleton.Return((() => {
-                                throw new Exception("a verified branch head requires tracked publication state");
-                            })()) : (value(previousPublication).IsOpen ? ((previous_1 = value(previousPublication), singleton.Bind(_.github.UpdatePullRequest(publish, previous_1.PullRequestNumber), () => singleton.Bind(_.github.FastForwardBranch(repository, publish.Branch, commitSha), () => singleton.Return(UpdateOutcome_Published(PublishService__publication(_, publish.Branch, previous_1.PullRequestNumber, commitSha))))))) : singleton.Bind(_.github.FastForwardBranch(repository, publish.Branch, commitSha), () => singleton.Bind(PublishService__createPullRequestAfterBranchMutation(_, publish, commitSha), (_arg_7) => singleton.Return(UpdateOutcome_Published(_arg_7))))));
-                        });
                     });
                 });
             }
             default:
                 return singleton.Return(UpdateOutcome_RunFailed(result.Messages));
         }
-    }), (_arg_10) => singleton.Return(UpdateOutcome_RunFailed(singleton$1(_arg_10.message)))));
+    }), (_arg_10) => singleton.Return(UpdateOutcome_RunFailed(singleton$1("GitHub publication failed without exposing remote error details.")))));
 }
 function PublishService__publication(this$, branch, pullRequestNumber, headSha) {
     return new Publication(branch, pullRequestNumber, headSha, true);
 }
 function PublishService__createPullRequestAfterBranchMutation(this$, update, commitSha) {
-    return singleton.Delay(() => singleton.TryWith(singleton.Delay(() => singleton.Bind(this$.github.CreatePullRequest(update), (_arg) => singleton.Return(PublishService__publication(this$, update.Branch, _arg, commitSha)))), (_arg_1) => {
-        const ex = _arg_1;
-        return singleton.Return((() => {
-            throw new Exception((concat$1("GitHub did not confirm a pull request after updating ", update.Branch, ". ") + "Rerun PaketaBot first; if no owned pull request exists, follow PaketaBot\'s recovery procedure. ") + ex.message, ex);
-        })());
+    return singleton.Delay(() => singleton.Bind(catchAsync(this$.github.CreatePullRequest(update)), (_arg) => {
+        const result = _arg;
+        return singleton.Return((result.tag === /* Choice2Of2 */ 1) ? FSharpResult$2_Error$(concat$1("GitHub did not confirm a pull request after updating ", update.Branch, ". ") + "Rerun PaketaBot first; if no owned pull request exists, follow PaketaBot\'s recovery procedure.") : FSharpResult$2_Ok(PublishService__publication(this$, update.Branch, result.fields[0], commitSha)));
     }));
 }
 
@@ -42644,6 +41563,21 @@ function writeResolution(path, artifact) {
         recursive: true,
     })), () => singleton.Bind(awaitPromise(writeFile$1(path, encodeArtifact(artifact))), () => singleton.Return(undefined))));
 }
+function readArtifact(path) {
+    return singleton.Delay(() => singleton.Bind(awaitPromise(lstat$1(path)), (_arg) => {
+        const stats = _arg;
+        const matchValue = PaketFiles_validateInput("the resolution artifact", 33554432, stats.size, stats.isFile(), stats.isSymbolicLink());
+        if (matchValue.tag === /* Ok */ 0) {
+            return singleton.ReturnFrom(awaitPromise(readFile(path, "utf8")));
+        }
+        else {
+            const message = matchValue.fields[0];
+            return singleton.Return((() => {
+                throw new Exception(message);
+            })());
+        }
+    }));
+}
 function resolveDependencies() {
     return singleton.Delay(() => {
         const workspace = requiredEnvironment("GITHUB_WORKSPACE");
@@ -42709,11 +41643,11 @@ function publishResolution(token) {
         const repositoryName = requiredEnvironment("GITHUB_REPOSITORY");
         const eventSha = requiredEnvironment("GITHUB_SHA");
         const resultPath = requiredInput("result-path");
-        return singleton.Bind(awaitPromise(readFile(resultPath, "utf8")), (_arg) => {
+        return singleton.Bind(readArtifact(resultPath), (_arg) => {
             let artifact;
             const matchValue = decodeArtifact(_arg);
             if (matchValue.tag === /* Error */ 1) {
-                throw new Exception(failureMessage(map(toString$2, matchValue.fields[0])));
+                throw new Exception("the resolution artifact is invalid");
             }
             else {
                 artifact = matchValue.fields[0];
@@ -42735,9 +41669,9 @@ function publishResolution(token) {
                             return singleton.Zero();
                         }
                         case /* RunFailed */ 2: {
-                            const messages_1 = outcome.fields[0];
+                            const messages = outcome.fields[0];
                             setOutput("outcome", "failed");
-                            setFailed(failureMessage(messages_1));
+                            setFailed(failureMessage(messages));
                             return singleton.Zero();
                         }
                         default: {
@@ -42766,7 +41700,7 @@ function start() {
         }));
     }), (_arg_2) => {
         setOutput("outcome", "failed");
-        setFailed(_arg_2.message);
+        setFailed("PaketaBot failed without exposing untrusted error details.");
         return singleton.Zero();
     }));
 }

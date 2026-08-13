@@ -18,8 +18,11 @@ credential-free resolver job, token-authenticated publisher job, guarded branch
 refresh, and Scriptorium test suite.
 
 V1 intentionally supports only repositories whose root `paket.dependencies`
-uses public HTTPS NuGet.org sources. Private feeds, Git dependencies, HTTP
-dependencies, and custom repository commands are rejected.
+uses the exact `https://api.nuget.org/v3/index.json` source. The root
+`paket.dependencies` and `paket.lock` must be regular files rather than
+symbolic links and are limited to 1 MiB and 8 MiB respectively. Private feeds,
+alternate endpoints, Git dependencies, HTTP dependencies, and custom
+repository commands are rejected.
 
 ## Use
 
@@ -37,7 +40,7 @@ reusable workflow and passes only the named secret:
 ```yaml
 jobs:
   update:
-    uses: dbrattli/paketabot/.github/workflows/paketabot.yml@v0.1.2
+    uses: dbrattli/paketabot/.github/workflows/paketabot.yml@v0.1.3
     permissions:
       contents: read
     secrets:
@@ -48,7 +51,7 @@ The action repository is private during development. To test it from another
 private repository owned by the same account, grant repository Actions access
 under **Settings → Actions → General → Access**. Consumers use the exact
 immutable release shown above; do not reference `main` or a movable major tag.
-`v0.1.2` is the current private preview; `v0.1.0` remains its immutable initial
+`v0.1.3` is the current private preview; `v0.1.0` remains its immutable initial
 smoke-tested release. The production `v1.0.0` release remains reserved until
 every public-release requirement in the threat model is satisfied.
 
@@ -70,6 +73,10 @@ The reusable workflow has two fresh GitHub-hosted jobs:
 
 The artifact records the caller repository and exact event SHA. The publisher
 rejects a mismatched artifact before using the token.
+
+Repository-controlled error text and Paket output are not copied into Action
+failure logs. PaketaBot emits bounded, application-authored diagnostics and
+bounds lock-derived pull-request tables before publishing them.
 
 The publisher treats a marked pull request created by the identity behind
 `PAKETABOT_TOKEN` as durable branch state. It refuses to overwrite an existing

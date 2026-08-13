@@ -24,15 +24,50 @@ let private eligibilityTests =
                         Eligibility.inspect "source https://user:secret@example.com/v3/index.json\nnuget Fable.Core"
 
                     match result with
-                    | Ineligible reasons -> assertThat reasons.Length (isEqualTo 1)
+                    | Ineligible reasons ->
+                        assertThat reasons.Length (isEqualTo 1)
+                        assertThat (reasons.Head.Contains("user")) isFalse
+                        assertThat (reasons.Head.Contains("secret")) isFalse
+                    | Eligible -> failwith "expected an ineligible repository"
+            )
+            test (
+                "rejects NuGet host lookalikes and alternate endpoints",
+                fun _ ->
+                    let sources = [
+                        "https://api.nuget.org.example.com/v3/index.json"
+                        "https://api.nuget.org/v3/index.json?redirect=https://example.com"
+                        "https://api.nuget.org/v3/index.json#fragment"
+                        "https://api.nuget.org/v3/redirect"
+                        "https://api.nuget.org:444/v3/index.json"
+                        "https://api.nuget.org./v3/index.json"
+                        "https://www.nuget.org/api/v2"
+                    ]
+
+                    let allRejected =
+                        sources
+                        |> List.forall (fun source ->
+                            match Eligibility.inspect $"source {source}\nnuget Fable.Core" with
+                            | Ineligible _ -> true
+                            | Eligible -> false)
+
+                    assertThat allRejected isTrue
+            )
+            test (
+                "does not echo credential directives",
+                fun _ ->
+                    match
+                        Eligibility.inspect "source https://api.nuget.org/v3/index.json\npassword repository-secret"
+                    with
+                    | Ineligible reasons ->
+                        assertThat reasons.Head (isEqualTo "unsupported Paket directive: password")
+                        assertThat (reasons.Head.Contains("repository-secret")) isFalse
                     | Eligible -> failwith "expected an ineligible repository"
             )
             test (
                 "rejects Git dependencies",
                 fun _ ->
                     match Eligibility.inspect "source https://api.nuget.org/v3/index.json\ngithub owner/repo" with
-                    | Ineligible reasons ->
-                        assertThat reasons.Head (isEqualTo "unsupported Paket directive: github owner/repo")
+                    | Ineligible reasons -> assertThat reasons.Head (isEqualTo "unsupported Paket directive: github")
                     | Eligible -> failwith "expected an ineligible repository"
             )
             test (
@@ -42,6 +77,45 @@ let private eligibilityTests =
                     | Ineligible reasons ->
                         assertThat reasons.Head (isEqualTo "paket.dependencies must declare a public NuGet.org source")
                     | Eligible -> failwith "expected an ineligible repository"
+            )
+        ]
+    )
+
+let private filePolicyTests =
+    testList (
+        "file policy",
+        [
+            test (
+                "accepts a file at its byte ceiling",
+                fun _ -> assertThat (PaketFiles.validateSize "paket.lock" 10 10) (isEqualTo (Ok()))
+            )
+            test (
+                "rejects an oversized file",
+                fun _ ->
+                    assertThat
+                        (PaketFiles.validateSize "paket.lock" 10 11)
+                        (isEqualTo (Error "paket.lock exceeds the 10-byte limit"))
+            )
+            test (
+                "rejects an invalid negative size",
+                fun _ ->
+                    assertThat
+                        (PaketFiles.validateSize "paket.lock" 10 -1)
+                        (isEqualTo (Error "paket.lock has an invalid size"))
+            )
+            test (
+                "rejects a symbolic link before reading",
+                fun _ ->
+                    assertThat
+                        (PaketFiles.validateInput "paket.lock" 10 5 true true)
+                        (isEqualTo (Error "paket.lock must be a regular file, not a symbolic link or special file"))
+            )
+            test (
+                "rejects a non-regular special file before reading",
+                fun _ ->
+                    assertThat
+                        (PaketFiles.validateInput "paket.lock" 10 5 false false)
+                        (isEqualTo (Error "paket.lock must be a regular file, not a symbolic link or special file"))
             )
         ]
     )
@@ -181,6 +255,25 @@ let private pullRequestBodyTests =
 
                     assertThat (body.Contains("| Package")) isFalse
                     assertThat (body.Contains("PaketaBot updated the versions")) isFalse
+            )
+            test (
+                "neutralizes and bounds untrusted lock metadata",
+                fun _ ->
+                    let malicious = "1.0|`<script>" + String.replicate 200 "x"
+
+                    let changes =
+                        [ 1..51 ]
+                        |> List.map (fun index -> {
+                            Name = $"Package{index}"
+                            Previous = malicious
+                            Current = "2.0.0"
+                        })
+
+                    let body = PullRequestBody.render changes []
+                    assertThat (body.Contains("1.0|`<script>")) isFalse
+                    assertThat (body.Contains("1.0¦ˋ<script>")) isTrue
+                    assertThat (body.Contains("first 50 of 51 detected changes")) isTrue
+                    assertThat (body.Contains("Package51")) isFalse
             )
         ]
     )
@@ -357,6 +450,7 @@ let tests =
         "core",
         [
             eligibilityTests
+            filePolicyTests
             lockDiffTests
             pullRequestTests
             pullRequestBodyTests

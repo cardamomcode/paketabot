@@ -7,14 +7,29 @@ open PaketaBot
 open PaketaBot.App.Bindings
 
 type PaketResolver(workspace: string, executable: string, isolatedHome: string) =
+    let readRepositoryFile path description maximumBytes =
+        async {
+            let! stats = lstat path |> Async.AwaitPromise
+
+            // decision: rejects symlinks before reading so root-only policy cannot escape the checked-out workspace through a link
+            // invariant: Paket inputs are regular, non-symbolic-link files whose byte size was checked before readFile
+            match
+                PaketFiles.validateInput description maximumBytes stats.size (stats.isFile ()) (stats.isSymbolicLink ())
+            with
+            | Error message -> return invalidOp message
+            | Ok() -> return! readFile path "utf8" |> Async.AwaitPromise
+        }
+
     interface IPaketResolver with
         member _.Resolve() =
             async {
                 do! mkdir isolatedHome (createObj [ "recursive" ==> true ]) |> Async.AwaitPromise
 
-                let dependenciesPath = join [| workspace; "paket.dependencies" |]
+                let dependenciesPath = join [| workspace; PaketFiles.Dependencies |]
                 let lockPath = join [| workspace; PaketFiles.Lock |]
-                let! dependencies = readFile dependenciesPath "utf8" |> Async.AwaitPromise
+
+                let! dependencies =
+                    readRepositoryFile dependenciesPath PaketFiles.Dependencies PaketFiles.MaxDependenciesBytes
 
                 match Eligibility.inspect dependencies with
                 | Ineligible reasons ->
@@ -26,7 +41,7 @@ type PaketResolver(workspace: string, executable: string, isolatedHome: string) 
                         Messages = reasons
                     }
                 | Eligible ->
-                    let! previous = readFile lockPath "utf8" |> Async.AwaitPromise
+                    let! previous = readRepositoryFile lockPath PaketFiles.Lock PaketFiles.MaxLockBytes
 
                     // decision: allowlists the Paket child environment so Actions runtime and GitHub credentials are not inherited
                     // invariant: only non-secret process settings cross from the resolver Action into Paket
@@ -50,9 +65,9 @@ type PaketResolver(workspace: string, executable: string, isolatedHome: string) 
                             "maxBuffer" ==> 1_048_576
                         ]
 
-                    let! _, stderr = execFile executable [| "update"; "--no-install" |] options |> Async.AwaitPromise
+                    let! _ = execFile executable [| "update"; "--no-install" |] options |> Async.AwaitPromise
 
-                    let! current = readFile lockPath "utf8" |> Async.AwaitPromise
+                    let! current = readRepositoryFile lockPath PaketFiles.Lock PaketFiles.MaxLockBytes
 
                     if current = previous then
                         return {
@@ -68,10 +83,6 @@ type PaketResolver(workspace: string, executable: string, isolatedHome: string) 
                             LockFile = Some current
                             Changes = LockDiff.changes previous current
                             RequirementChanges = LockDiff.requirementChanges previous current
-                            Messages =
-                                if String.IsNullOrWhiteSpace(stderr) then
-                                    []
-                                else
-                                    [ stderr.Trim() ]
+                            Messages = []
                         }
             }

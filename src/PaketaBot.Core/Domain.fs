@@ -120,8 +120,42 @@ module PaketFiles =
     [<Literal>]
     let Lock = "paket.lock"
 
+    [<Literal>]
+    let Dependencies = "paket.dependencies"
+
+    [<Literal>]
+    let MaxDependenciesBytes = 1_048_576
+
+    [<Literal>]
+    let MaxLockBytes = 8_388_608
+
+    [<Literal>]
+    let MaxArtifactBytes = 33_554_432
+
     let isLock path =
         String.Equals(path, Lock, StringComparison.Ordinal)
+
+    /// Bound every repository-controlled file before it is read into memory or
+    /// exchanged between jobs.
+    ///
+    /// decision: uses explicit byte ceilings because GitHub artifact limits do not protect the Action process itself
+    /// invariant: dependencies, lock, and artifact inputs larger than their declared ceiling are rejected before reading
+    let validateSize description maximumBytes actualBytes =
+        if actualBytes < 0 then
+            Error $"{description} has an invalid size"
+        elif actualBytes > maximumBytes then
+            Error $"{description} exceeds the {maximumBytes}-byte limit"
+        else
+            Ok()
+
+    /// Apply the complete pre-read policy to one observed filesystem entry.
+    ///
+    /// invariant: an accepted input is a regular non-symbolic-link entry within its byte ceiling
+    let validateInput description maximumBytes actualBytes isRegularFile isSymbolicLink =
+        if isSymbolicLink || not isRegularFile then
+            Error $"{description} must be a regular file, not a symbolic link or special file"
+        else
+            validateSize description maximumBytes actualBytes
 
 module Checkouts =
     let validateRevision eventSha resolvedSha =
