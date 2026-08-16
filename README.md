@@ -57,40 +57,15 @@ GitHub Actions concurrency prevents overlapping runs. PaketaBot refreshes only
 the `paketabot/weekly` branch and publishes only `paket.lock`. Manual runs must
 use the repository's default branch.
 
-## Credential boundary
+## Safety
 
-The reusable workflow has two fresh GitHub-hosted jobs:
+PaketaBot keeps your repository files and its publishing token in separate
+jobs. The job that updates Paket cannot access your token, and the job that
+uses the token never checks out or runs your repository's code.
 
-1. The resolver checks out the caller revision without persisting credentials,
-   validates the source policy, and runs `paket update --no-install`. It never
-   receives `PAKETABOT_TOKEN`, and Paket receives an allowlisted child-process
-   environment without Actions or GitHub credentials.
-2. The publisher downloads the typed result artifact but never checks out or
-   executes repository contents. Only this job receives `PAKETABOT_TOKEN`.
-
-The artifact records the caller repository and exact event SHA. The publisher
-rejects a mismatched artifact before using the token.
-
-Repository-controlled error text and Paket output are not copied into Action
-failure logs. PaketaBot emits bounded, application-authored diagnostics and
-bounds lock-derived pull-request tables before publishing them.
-
-The publisher treats a marked pull request created by the identity behind
-`PAKETABOT_TOKEN` as durable branch state. It refuses to overwrite an existing
-branch without that ownership record, requires the branch ref to match the
-recorded pull-request head, and moves existing branches only through a
-non-forced fast-forward. Refresh commits also merge the exact current base so
-the pull request continues to contain only `paket.lock` after main advances.
-
-Rotating the token without changing its GitHub identity preserves this state.
-Future GitHub App support will provide the installation identity alongside a
-short-lived token through the authentication adapter. A centrally owned App
-private key must never be distributed to consuming repositories.
-
-Most interrupted publications recover by rerunning the workflow. If GitHub did
-not confirm pull-request creation after moving the bot branch, use the
-[fail-closed recovery procedure](docs/recovery.md); PaketaBot will not guess
-that an untracked branch belongs to it.
+It only updates the `paketabot/weekly` branch and changes `paket.lock`. For
+the security model, limitations, and recovery guidance, see the
+[threat model](docs/threat-model.md).
 
 ## Development
 

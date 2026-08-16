@@ -24,6 +24,9 @@ cross-tenant risk, but it does not make dependency content trustworthy.
 - The publisher never checks out or executes repository contents.
 - The artifact carries the caller repository and exact event SHA; the publisher
   rejects mismatches and non-default-branch refs before using the token.
+- Repository-controlled error text and Paket output are not copied into Action
+  failure logs. PaketaBot emits bounded, application-authored diagnostics and
+  bounds lock-derived pull-request tables before publishing them.
 - Only bounded, regular root Paket files using the exact
   `https://api.nuget.org/v3/index.json` source are eligible; symbolic links,
   alternate ports, paths, queries, fragments, and lookalike hosts are rejected.
@@ -54,6 +57,26 @@ cross-tenant risk, but it does not make dependency content trustworthy.
   own exact release tag for both internal Action operations.
 - Behavioral tests inspect the committed reusable workflow to preserve job
   isolation, one-day artifact retention, and exact internal release references.
+
+## Publication state and recovery
+
+The publisher treats a marked pull request created by the identity behind
+`PAKETABOT_TOKEN` as durable branch state. It refuses to overwrite a branch
+without that ownership record, requires the branch ref to match the recorded
+pull-request head, and moves existing branches only through a non-forced
+fast-forward. Refresh commits also merge the exact current base so the pull
+request continues to contain only `paket.lock` after the default branch
+advances.
+
+Rotating a token without changing its GitHub identity preserves this state.
+Future GitHub App support will provide the installation identity alongside a
+short-lived token through the authentication adapter. A centrally owned App
+private key must never be distributed to consuming repositories.
+
+Most interrupted publications recover by rerunning the workflow. If GitHub did
+not confirm pull-request creation after moving the bot branch, use the
+[fail-closed recovery procedure](recovery.md); PaketaBot will not guess that an
+untracked branch belongs to it.
 
 ## Network egress limitation
 
