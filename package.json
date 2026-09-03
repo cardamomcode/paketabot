@@ -24,8 +24,8 @@
   "devDependencies": {
     "@rollup/plugin-commonjs": "29.0.3",
     "@rollup/plugin-node-resolve": "16.0.3",
-    "@types/node": "26.2.0",
-    "rollup": "4.62.4",
+    "@types/node": "26.4.0",
+    "rollup": "4.63.1",
     "typescript": "7.0.2"
   }
 }
