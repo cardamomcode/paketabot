@@ -13,13 +13,16 @@ the workflow's two jobs.
 
 ## Status
 
-This repository contains a private, pre-release vertical slice. It includes a
+This repository contains the public PaketaBot workflow. It includes a
 credential-free resolver job, token-authenticated publisher job, guarded branch
 refresh, and Scriptorium test suite.
 
 V1 intentionally supports only repositories whose root `paket.dependencies`
-uses public HTTPS NuGet.org sources. Private feeds, Git dependencies, HTTP
-dependencies, and custom repository commands are rejected.
+uses the exact `https://api.nuget.org/v3/index.json` source. The root
+`paket.dependencies` and `paket.lock` must be regular files rather than
+symbolic links and are limited to 1 MiB and 8 MiB respectively. Private feeds,
+alternate endpoints, Git dependencies, HTTP dependencies, and custom
+repository commands are rejected.
 
 ## Use
 
@@ -37,46 +40,32 @@ reusable workflow and passes only the named secret:
 ```yaml
 jobs:
   update:
-    uses: dbrattli/paketabot/.github/workflows/paketabot.yml@main
+    uses: cardamomcode/paketabot/.github/workflows/paketabot.yml@v1.0.0
     permissions:
       contents: read
     secrets:
       paketabot_token: ${{ secrets.PAKETABOT_TOKEN }}
 ```
 
-The action repository is private during development, so GitHub repository
-settings must allow the consuming repository to access it. Published versions
-will use an immutable release reference instead of `main`.
+Consumers use the exact immutable release shown above; do not reference `main`
+or a movable major tag. The `v0.1.x` releases remain immutable previews used to
+exercise the complete workflow before the repository became public. The
+production `v1.0.0` tag is published only from its reviewed release commit.
 
 The example runs weekly and supports manual runs through `workflow_dispatch`.
 GitHub Actions concurrency prevents overlapping runs. PaketaBot refreshes only
 the `paketabot/weekly` branch and publishes only `paket.lock`. Manual runs must
 use the repository's default branch.
 
-## Credential boundary
+## Safety
 
-The reusable workflow has two fresh GitHub-hosted jobs:
+PaketaBot keeps your repository files and its publishing token in separate
+jobs. The job that updates Paket cannot access your token, and the job that
+uses the token never checks out or runs your repository's code.
 
-1. The resolver checks out the caller revision without persisting credentials,
-   validates the source policy, and runs `paket update --no-install`. It never
-   receives `PAKETABOT_TOKEN`, and Paket receives an allowlisted child-process
-   environment without Actions or GitHub credentials.
-2. The publisher downloads the typed result artifact but never checks out or
-   executes repository contents. Only this job receives `PAKETABOT_TOKEN`.
-
-The artifact records the caller repository and exact event SHA. The publisher
-rejects a mismatched artifact before using the token.
-
-The publisher treats a marked pull request created by the identity behind
-`PAKETABOT_TOKEN` as durable branch state. It refuses to overwrite an existing
-branch without that ownership record, requires the branch ref to match the
-recorded pull-request head, and moves existing branches only through a
-non-forced fast-forward.
-
-Rotating the token without changing its GitHub identity preserves this state.
-Future GitHub App support will provide the installation identity alongside a
-short-lived token through the authentication adapter. A centrally owned App
-private key must never be distributed to consuming repositories.
+It only updates the `paketabot/weekly` branch and changes `paket.lock`. For
+the security model, limitations, and recovery guidance, see the
+[threat model](docs/threat-model.md).
 
 ## Development
 
@@ -98,7 +87,8 @@ under `dist/` are generated artifacts and must not be edited manually.
 
 See [Architecture](docs/architecture.md) and the
 [Threat model](docs/threat-model.md) for the trust boundary and remaining
-release work.
+release work. Maintainers should also follow the
+[release procedure](docs/releasing.md) and [recovery procedure](docs/recovery.md).
 
 PaketaBot adopts [Agent Decision Comments](https://github.com/dbrattli/adc).
 The pinned local convention is in `AGENT_DECISION_COMMENTS.md`.

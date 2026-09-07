@@ -4,4 +4,4 @@ open type Scriptorium.Quill.Runner
 
 [<EntryPoint>]
 let main _ =
-    runTests [ CoreTests.tests; WorkflowTests.tests ]
+    runTests [ CoreTests.tests; WorkflowTests.tests; WorkflowContractTests.tests ]

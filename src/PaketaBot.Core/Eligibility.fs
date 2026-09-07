@@ -7,40 +7,35 @@ type Eligibility =
     | Ineligible of reasons: string list
 
 module Eligibility =
-    let private publicNuGetHosts = set [ "api.nuget.org"; "www.nuget.org"; "nuget.org" ]
+    [<Literal>]
+    let PublicNuGetV3Source = "https://api.nuget.org/v3/index.json"
 
     let private isCommentOrEmpty (line: string) =
         let value = line.Trim()
         String.IsNullOrWhiteSpace(value) || value.StartsWith("#")
 
     let private sourceReason (line: string) =
-        let value = line.Trim().Substring("source ".Length).Trim().Trim('"')
+        let raw = line.Trim().Substring("source ".Length).Trim()
 
-        let hasUserInfo =
-            let schemeSeparator = value.IndexOf("://", StringComparison.Ordinal)
-
-            if schemeSeparator < 0 then
-                false
+        let value =
+            if raw.Length >= 2 && raw[0] = '"' && raw[raw.Length - 1] = '"' then
+                raw.Substring(1, raw.Length - 2)
             else
-                let authorityStart = schemeSeparator + 3
-                let pathStart = value.IndexOf('/', authorityStart)
+                raw
 
-                let authority =
-                    if pathStart < 0 then
-                        value.Substring(authorityStart)
-                    else
-                        value.Substring(authorityStart, pathStart - authorityStart)
-
-                authority.Contains('@')
-
-        match Uri.TryCreate(value, UriKind.Absolute) with
-        | true, uri when
-            uri.Scheme = "https"
-            && publicNuGetHosts.Contains(uri.Host.ToLowerInvariant())
-            && not hasUserInfo
-            ->
+        if
+            String.Equals(value, PublicNuGetV3Source, StringComparison.Ordinal)
+            && not (raw.Contains('"') && not (raw.StartsWith('"') && raw.EndsWith('"')))
+        then
             None
-        | _ -> Some $"unsupported package source: {value}"
+        else
+            Some $"unsupported package source; V1 requires `source {PublicNuGetV3Source}`"
+
+    let private directiveName (value: string) =
+        value.Split([| ' '; '\t' |], StringSplitOptions.RemoveEmptyEntries)
+        |> Array.tryHead
+        |> Option.defaultValue "unknown"
+        |> _.ToLowerInvariant()
 
     let private unsupportedReason (line: string) =
         let value = line.Trim()
@@ -61,14 +56,15 @@ module Eligibility =
             ]
             |> List.exists lower.StartsWith
         then
-            Some $"unsupported Paket directive: {value}"
+            Some $"unsupported Paket directive: {directiveName value}"
         else
             None
 
     /// Validate the deliberately narrow credential-free runner policy for Paket inputs.
     ///
-    /// decision: v1 accepts only HTTPS NuGet.org sources so the runner never needs package-source credentials
-    /// invariant: every non-comment source directive resolves to a public NuGet.org host without user information
+    /// decision: v1 accepts only the canonical HTTPS NuGet.org v3 index so source validation cannot be bypassed with alternate paths
+    /// invariant: every non-comment source directive is the credential-free api.nuget.org v3 index without query or fragment data
+    /// tradeoff: rejects other public NuGet.org endpoints to keep the pre-execution network policy exact and reviewable
     let inspect (dependencies: string) =
         let lines =
             dependencies.Split([| '\r'; '\n' |], StringSplitOptions.RemoveEmptyEntries)

@@ -24,14 +24,75 @@ cross-tenant risk, but it does not make dependency content trustworthy.
 - The publisher never checks out or executes repository contents.
 - The artifact carries the caller repository and exact event SHA; the publisher
   rejects mismatches and non-default-branch refs before using the token.
-- Only root Paket files using public HTTPS NuGet.org sources are eligible.
+- Repository-controlled error text and Paket output are not copied into Action
+  failure logs. PaketaBot emits bounded, application-authored diagnostics and
+  bounds lock-derived pull-request tables before publishing them.
+- Only bounded, regular root Paket files using the exact
+  `https://api.nuget.org/v3/index.json` source are eligible; symbolic links,
+  alternate ports, paths, queries, fragments, and lookalike hosts are rejected.
 - Git, GitHub, HTTP-file, local-path, cache, credential, and alternative-source
   directives are rejected.
+- Repository directives, Paket stderr, artifact decoder errors, and Octokit
+  errors are not copied into Action failure logs. Application diagnostics are
+  static and bounded, and credential-bearing directives are reported by name
+  without their values.
+- Lock-derived pull-request cells are neutralized and length-bounded, and each
+  summary table is limited to 50 rows.
 - Publishing accepts only `paketabot/weekly` and only the root `paket.lock`.
 - An existing branch is trusted only when a marked pull request created by the
   authenticated token identity records the same head; an untracked or
   mismatched head is rejected.
-- Existing bot branches move through non-forced fast-forwards.
+- Existing bot branches move through non-forced fast-forwards. Refresh commits
+  merge the exact current base behind the verified bot head so intervening base
+  changes do not enter the pull-request diff.
+- Refreshing an open owned pull request updates its metadata before moving the
+  branch, so no fallible GitHub API call follows the ref update.
+- An uncertain pull-request creation is retried before any manual action. If no
+  owned pull request exists, publication fails closed and requires the
+  documented human-verified recovery procedure; the bot never automatically
+  deletes an untracked ref.
+- Third-party Actions are pinned to reviewed full commit SHAs rather than
+  mutable version tags.
+- Repository-level immutable releases are enabled. Released workflows use their
+  own exact release tag for both internal Action operations.
+- Behavioral tests inspect the committed reusable workflow to preserve job
+  isolation, one-day artifact retention, and exact internal release references.
+
+## Publication state and recovery
+
+The publisher treats a marked pull request created by the identity behind
+`PAKETABOT_TOKEN` as durable branch state. It refuses to overwrite a branch
+without that ownership record, requires the branch ref to match the recorded
+pull-request head, and moves existing branches only through a non-forced
+fast-forward. Refresh commits also merge the exact current base so the pull
+request continues to contain only `paket.lock` after the default branch
+advances.
+
+Rotating a token without changing its GitHub identity preserves this state.
+Future GitHub App support will provide the installation identity alongside a
+short-lived token through the authentication adapter. A centrally owned App
+private key must never be distributed to consuming repositories.
+
+Most interrupted publications recover by rerunning the workflow. If GitHub did
+not confirm pull-request creation after moving the bot branch, use the
+[fail-closed recovery procedure](recovery.md); PaketaBot will not guess that an
+untracked branch belongs to it.
+
+## Network egress limitation
+
+The exact source policy rejects repository-configured redirects, alternate
+hosts, and DNS lookalikes before Paket starts. It does not pin DNS answers or
+TLS certificates, and NuGet.org metadata can legitimately direct the NuGet
+client to additional NuGet.org CDN and content endpoints.
+
+GitHub-hosted runners do not provide a repository-level outbound firewall.
+Enforcing endpoint-level egress would require a controlled runner or proxy,
+which would add a hosted trust boundary and conflict with the no-service V1
+deployment. V1 therefore accepts unrestricted resolver-job network egress as
+an explicit production limitation. A compromised Paket/NuGet client, official
+NuGet.org response, DNS path, or GitHub-hosted runner could access the network
+as the resolver job, although the Paket child receives no GitHub token or
+Actions runtime credentials.
 
 ## Token guidance
 
@@ -44,26 +105,33 @@ Future App support requires an organization-controlled secret or a small token
 broker that returns a short-lived installation token and its verified publisher
 identity.
 
-## Required before a public release
+## Verified public-readiness work
 
-- Publish immutable releases and hardcode the same immutable Action version in
-  each released reusable workflow; the private pre-release currently references
-  `main` internally.
-- Pin third-party Actions by immutable commit SHA.
-- Make branch mutation and pull-request mutation recoverable across partial
-  GitHub API failures.
-- Add bounded diagnostic logging that reliably redacts tokens and repository
-  secrets.
-- Exercise the resolver with malicious Paket files, oversized files, parser
-  edge cases, redirects, DNS rebinding attempts, and compromised package
-  metadata.
-- Evaluate infrastructure-enforced network egress controls if the source policy
-  and `paket update --no-install` boundary prove insufficient against Paket or
-  NuGet client vulnerabilities.
-- Document and test private-workflow sharing, token rotation, artifact retention,
-  and the GitHub App migration path.
-- Define an explicit recovery procedure when the publisher identity changes or
-  the ownership pull request is edited or deleted.
+- The immutable private preview `v0.1.0` was published from its reviewed release
+  commit and smoke-tested with its exact tag in both jobs.
+- The completed hardening was published as immutable preview `v0.1.3` and its
+  two-job resolver and publisher path was smoke-tested in a controlled consumer.
+- The source policy is exercised with credential-bearing files, oversized inputs,
+  parser edge cases, redirect-shaped paths, DNS lookalikes, and
+  metadata-derived Markdown. The application rejects or bounds these inputs
+  without echoing them to logs.
+- Infrastructure-enforced egress controls were evaluated; the unsupported
+  boundary above remains because V1 has no controlled runner, proxy, or hosted
+  service.
+- Private workflow sharing and token rotation were smoke-tested in a controlled
+  consumer. Tests cover artifact retention and the two-job credential contract,
+  and the GitHub App migration boundary is documented.
+- Reachable branches, tags, and closed pull-request heads were screened for
+  credential signatures and private-key files before the visibility change.
+- The public repository requires the `check` status on `main`, prevents branch
+  deletion and force pushes, and has secret scanning, push protection, and
+  private vulnerability reporting enabled. The initial secret-scanning alert
+  review found no alerts.
+
+## Required before the production release
+
+- After every other requirement is satisfied, publish `v1.0.0` from a reviewed
+  commit whose reusable workflow invokes that same exact production tag.
 
 The job boundary prevents repository content processed by Paket from sharing a
 runner with `PAKETABOT_TOKEN`. It does not sandbox Paket from the resolve job's

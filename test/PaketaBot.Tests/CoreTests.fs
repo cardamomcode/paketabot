@@ -24,15 +24,50 @@ let private eligibilityTests =
                         Eligibility.inspect "source https://user:secret@example.com/v3/index.json\nnuget Fable.Core"
 
                     match result with
-                    | Ineligible reasons -> assertThat reasons.Length (isEqualTo 1)
+                    | Ineligible reasons ->
+                        assertThat reasons.Length (isEqualTo 1)
+                        assertThat (reasons.Head.Contains("user")) isFalse
+                        assertThat (reasons.Head.Contains("secret")) isFalse
+                    | Eligible -> failwith "expected an ineligible repository"
+            )
+            test (
+                "rejects NuGet host lookalikes and alternate endpoints",
+                fun _ ->
+                    let sources = [
+                        "https://api.nuget.org.example.com/v3/index.json"
+                        "https://api.nuget.org/v3/index.json?redirect=https://example.com"
+                        "https://api.nuget.org/v3/index.json#fragment"
+                        "https://api.nuget.org/v3/redirect"
+                        "https://api.nuget.org:444/v3/index.json"
+                        "https://api.nuget.org./v3/index.json"
+                        "https://www.nuget.org/api/v2"
+                    ]
+
+                    let allRejected =
+                        sources
+                        |> List.forall (fun source ->
+                            match Eligibility.inspect $"source {source}\nnuget Fable.Core" with
+                            | Ineligible _ -> true
+                            | Eligible -> false)
+
+                    assertThat allRejected isTrue
+            )
+            test (
+                "does not echo credential directives",
+                fun _ ->
+                    match
+                        Eligibility.inspect "source https://api.nuget.org/v3/index.json\npassword repository-secret"
+                    with
+                    | Ineligible reasons ->
+                        assertThat reasons.Head (isEqualTo "unsupported Paket directive: password")
+                        assertThat (reasons.Head.Contains("repository-secret")) isFalse
                     | Eligible -> failwith "expected an ineligible repository"
             )
             test (
                 "rejects Git dependencies",
                 fun _ ->
                     match Eligibility.inspect "source https://api.nuget.org/v3/index.json\ngithub owner/repo" with
-                    | Ineligible reasons ->
-                        assertThat reasons.Head (isEqualTo "unsupported Paket directive: github owner/repo")
+                    | Ineligible reasons -> assertThat reasons.Head (isEqualTo "unsupported Paket directive: github")
                     | Eligible -> failwith "expected an ineligible repository"
             )
             test (
@@ -42,6 +77,45 @@ let private eligibilityTests =
                     | Ineligible reasons ->
                         assertThat reasons.Head (isEqualTo "paket.dependencies must declare a public NuGet.org source")
                     | Eligible -> failwith "expected an ineligible repository"
+            )
+        ]
+    )
+
+let private filePolicyTests =
+    testList (
+        "file policy",
+        [
+            test (
+                "accepts a file at its byte ceiling",
+                fun _ -> assertThat (PaketFiles.validateSize "paket.lock" 10 10) (isEqualTo (Ok()))
+            )
+            test (
+                "rejects an oversized file",
+                fun _ ->
+                    assertThat
+                        (PaketFiles.validateSize "paket.lock" 10 11)
+                        (isEqualTo (Error "paket.lock exceeds the 10-byte limit"))
+            )
+            test (
+                "rejects an invalid negative size",
+                fun _ ->
+                    assertThat
+                        (PaketFiles.validateSize "paket.lock" 10 -1)
+                        (isEqualTo (Error "paket.lock has an invalid size"))
+            )
+            test (
+                "rejects a symbolic link before reading",
+                fun _ ->
+                    assertThat
+                        (PaketFiles.validateInput "paket.lock" 10 5 true true)
+                        (isEqualTo (Error "paket.lock must be a regular file, not a symbolic link or special file"))
+            )
+            test (
+                "rejects a non-regular special file before reading",
+                fun _ ->
+                    assertThat
+                        (PaketFiles.validateInput "paket.lock" 10 5 false false)
+                        (isEqualTo (Error "paket.lock must be a regular file, not a symbolic link or special file"))
             )
         ]
     )
@@ -63,6 +137,32 @@ let private lockDiffTests =
                                 Name = "Fable.Core"
                                 Previous = "5.1.0"
                                 Current = "5.2.0"
+                            }
+                        ])
+            )
+            test (
+                "reports changed dependency requirements with their parent package",
+                fun _ ->
+                    let previous =
+                        "NUGET\n  specs:\n    Fable.Giraffe.Beam (5.4)\n      Fable.TypedJson (>= 5.0.1)\n      Fable.TypedJson.Beam (>= 5.0)"
+
+                    let current =
+                        "NUGET\n  specs:\n    Fable.Giraffe.Beam (5.4)\n      Fable.TypedJson (>= 5.1)\n      Fable.TypedJson.Beam (>= 5.1)"
+
+                    assertThat
+                        (LockDiff.requirementChanges previous current)
+                        (isEqualTo [
+                            {
+                                Name = "Fable.TypedJson"
+                                RequiredBy = "Fable.Giraffe.Beam"
+                                Previous = ">= 5.0.1"
+                                Current = ">= 5.1"
+                            }
+                            {
+                                Name = "Fable.TypedJson.Beam"
+                                RequiredBy = "Fable.Giraffe.Beam"
+                                Previous = ">= 5.0"
+                                Current = ">= 5.1"
                             }
                         ])
             )
@@ -94,6 +194,87 @@ let private pullRequestTests =
                 fun _ -> assertThat (PullRequests.isTrackedBody "update") isFalse
             )
             test ("rejects missing pull request bodies", fun _ -> assertThat (PullRequests.isTrackedBody null) isFalse)
+        ]
+    )
+
+let private pullRequestBodyTests =
+    testList (
+        "pull request body",
+        [
+            test (
+                "lists changed resolved package versions",
+                fun _ ->
+                    let body =
+                        PullRequestBody.render [
+                            {
+                                Name = "Fable.Core"
+                                Previous = "5.1.0"
+                                Current = "5.2.0"
+                            }
+                        ] []
+
+                    assertThat (body.Contains("| Package | From | To |")) isTrue
+                    assertThat (body.Contains("| `Fable.Core` | `5.1.0` | `5.2.0` |")) isTrue
+            )
+            test (
+                "lists changed dependency requirements without claiming version updates",
+                fun _ ->
+                    let body =
+                        PullRequestBody.render [] [
+                            {
+                                Name = "Fable.TypedJson"
+                                RequiredBy = "Fable.Giraffe.Beam"
+                                Previous = ">= 5.0.1"
+                                Current = ">= 5.1"
+                            }
+                        ]
+
+                    assertThat
+                        (body.Contains(
+                            "Paket refreshed dependency requirements recorded in `paket.lock` without changing resolved package versions."
+                        ))
+                        isTrue
+
+                    assertThat (body.Contains("| Package | Required by | From | To |")) isTrue
+
+                    assertThat
+                        (body.Contains("| `Fable.TypedJson` | `Fable.Giraffe.Beam` | `>= 5.0.1` | `>= 5.1` |"))
+                        isTrue
+
+                    assertThat (body.Contains("| Package | From | To |")) isFalse
+                    assertThat (body.Contains("PaketaBot updated the versions")) isFalse
+            )
+            test (
+                "describes an otherwise unsummarized lock refresh without an empty table",
+                fun _ ->
+                    let body = PullRequestBody.render [] []
+
+                    assertThat
+                        (body.Contains("Paket refreshed `paket.lock` without changing resolved package versions."))
+                        isTrue
+
+                    assertThat (body.Contains("| Package")) isFalse
+                    assertThat (body.Contains("PaketaBot updated the versions")) isFalse
+            )
+            test (
+                "neutralizes and bounds untrusted lock metadata",
+                fun _ ->
+                    let malicious = "1.0|`<script>" + String.replicate 200 "x"
+
+                    let changes =
+                        [ 1..51 ]
+                        |> List.map (fun index -> {
+                            Name = $"Package{index}"
+                            Previous = malicious
+                            Current = "2.0.0"
+                        })
+
+                    let body = PullRequestBody.render changes []
+                    assertThat (body.Contains("1.0|`<script>")) isFalse
+                    assertThat (body.Contains("1.0¦ˋ<script>")) isTrue
+                    assertThat (body.Contains("first 50 of 51 detected changes")) isTrue
+                    assertThat (body.Contains("Package51")) isFalse
+            )
         ]
     )
 
@@ -163,6 +344,7 @@ let private artifactTests =
                             Status = NoChange
                             LockFile = None
                             Changes = []
+                            RequirementChanges = []
                             Messages = []
                         }
                     }
@@ -179,6 +361,7 @@ let private artifactTests =
                             Status = NoChange
                             LockFile = None
                             Changes = []
+                            RequirementChanges = []
                             Messages = []
                         }
                     }
@@ -197,6 +380,7 @@ let private artifactTests =
                             Status = NoChange
                             LockFile = None
                             Changes = []
+                            RequirementChanges = []
                             Messages = []
                         }
                     }
@@ -234,6 +418,17 @@ let private branchTests =
                         (isEqualTo (Ok(Branches.FastForwardFrom "tracked")))
             )
             test (
+                "creates a refresh commit from the verified head and exact base",
+                fun _ ->
+                    assertThat
+                        (Branches.commitParents "base" (Branches.FastForwardFrom "tracked"))
+                        (isEqualTo [ "tracked"; "base" ])
+            )
+            test (
+                "creates a new publication commit directly from its exact base",
+                fun _ -> assertThat (Branches.commitParents "base" (Branches.CreateFrom "base")) (isEqualTo [ "base" ])
+            )
+            test (
                 "rejects an untracked existing branch",
                 fun _ ->
                     assertThat
@@ -255,8 +450,10 @@ let tests =
         "core",
         [
             eligibilityTests
+            filePolicyTests
             lockDiffTests
             pullRequestTests
+            pullRequestBodyTests
             checkoutTests
             actionOperationTests
             artifactTests

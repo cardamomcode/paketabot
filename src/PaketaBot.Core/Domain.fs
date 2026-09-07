@@ -17,6 +17,13 @@ type VersionChange = {
     Current: string
 }
 
+type RequirementChange = {
+    Name: string
+    RequiredBy: string
+    Previous: string
+    Current: string
+}
+
 type ResolutionStatus =
     | NoChange
     | Updated
@@ -27,6 +34,7 @@ type ResolutionResult = {
     Status: ResolutionStatus
     LockFile: string option
     Changes: VersionChange list
+    RequirementChanges: RequirementChange list
     Messages: string list
 }
 
@@ -40,12 +48,12 @@ type Publication = {
     Branch: string
     PullRequestNumber: int
     HeadSha: string
+    IsOpen: bool
 }
 
 type PublishUpdate = {
     Repository: Repository
     BaseSha: string
-    PreviousPublication: Publication option
     Branch: string
     Path: string
     Content: string
@@ -112,8 +120,42 @@ module PaketFiles =
     [<Literal>]
     let Lock = "paket.lock"
 
+    [<Literal>]
+    let Dependencies = "paket.dependencies"
+
+    [<Literal>]
+    let MaxDependenciesBytes = 1_048_576
+
+    [<Literal>]
+    let MaxLockBytes = 8_388_608
+
+    [<Literal>]
+    let MaxArtifactBytes = 33_554_432
+
     let isLock path =
         String.Equals(path, Lock, StringComparison.Ordinal)
+
+    /// Bound every repository-controlled file before it is read into memory or
+    /// exchanged between jobs.
+    ///
+    /// decision: uses explicit byte ceilings because GitHub artifact limits do not protect the Action process itself
+    /// invariant: dependencies, lock, and artifact inputs larger than their declared ceiling are rejected before reading
+    let validateSize description maximumBytes actualBytes =
+        if actualBytes < 0 then
+            Error $"{description} has an invalid size"
+        elif actualBytes > maximumBytes then
+            Error $"{description} exceeds the {maximumBytes}-byte limit"
+        else
+            Ok()
+
+    /// Apply the complete pre-read policy to one observed filesystem entry.
+    ///
+    /// invariant: an accepted input is a regular non-symbolic-link entry within its byte ceiling
+    let validateInput description maximumBytes actualBytes isRegularFile isSymbolicLink =
+        if isSymbolicLink || not isRegularFile then
+            Error $"{description} must be a regular file, not a symbolic link or special file"
+        else
+            validateSize description maximumBytes actualBytes
 
 module Checkouts =
     let validateRevision eventSha resolvedSha =
@@ -153,10 +195,19 @@ module Branches =
     ///
     /// decision: refreshes descend from the verified bot head while their tree snapshots the latest default branch
     /// invariant: an existing owned branch moves only by non-forced fast-forward from its verified current head
-    /// tradeoff: retains bot branch history instead of rebasing it to prevent check-then-force overwrite races
+    /// tradeoff: retains bot branch history instead of force-rebasing it to prevent check-then-overwrite races
     let planPublication baseSha expectedHead currentHead =
         match currentHead, expectedHead with
         | None, _ -> Ok(CreateFrom baseSha)
         | Some actual, Some expected when actual = expected -> Ok(FastForwardFrom actual)
         | Some _, None -> Error "the target branch exists but is not tracked as PaketaBot-owned"
         | Some _, Some _ -> Error "the target branch changed outside PaketaBot; refusing to overwrite it"
+
+    /// Select commit parents that preserve branch ownership and the pull request's lockfile-only diff.
+    ///
+    /// decision: refreshes merge the exact base behind the verified bot head so main is an ancestor without force-pushing
+    /// invariant: the verified bot head is the first refresh parent and the exact current base is the second parent
+    let commitParents baseSha publicationPlan =
+        match publicationPlan with
+        | CreateFrom sha -> [ sha ]
+        | FastForwardFrom verifiedHead -> [ verifiedHead; baseSha ]
