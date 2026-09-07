@@ -33597,12 +33597,8 @@ function getGenericInnerType(t) {
     return item(0, getGenerics(t));
 }
 /**
- * Lazily wrap a backend-native value as a `JsonValue` for hand-off to
- * user codecs (`IJsonCodec.Decode`). Internal `coerce` never calls this
- * — it routes through `IJsonBackend.IsX` / `AsX` directly. On Fable
- * backends each `JString s` etc. is identity (no allocation thanks to
- * `[<Erase>]` legacy / Fable's representation of struct DUs); on the
- * .NET shim each call allocates a small DU instance.
+ * Wrap a backend-native value as a `JsonValue` for hand-off to a user codec.
+ * Built-in plan nodes stay on `IJsonBackend.IsX` / `AsX` and do not call this.
  */
 function toJsonValue(backend, fv) {
     if (backend.IsString(fv)) {
@@ -33658,8 +33654,7 @@ function fromJsonValue(backend, jv) {
 }
 /**
  * Render a backend-native value as a short human-readable string for
- * error messages — replaces the JsonValue pattern match the old
- * coerce-error path used.
+ * error messages without first constructing a `JsonValue`.
  */
 function describeValue(backend, fv) {
     if (backend.IsString(fv)) {
@@ -33707,9 +33702,8 @@ function mapLookup(backend, m, key) {
 }
 /**
  * Adapt a Map<string, string> (e.g., ToolCall.input from LLM). Each value
- * is the raw F# string — `coerce` recognises it via `backend.IsString`
- * and dispatches into the string-target arm of the giant primitive
- * pattern (which can also coerce to int / float / bool).
+ * is the raw F# string; primitive plan nodes classify it through
+ * `backend.IsString` and can coerce it to int, float, or bool.
  */
 function stringMapAdapter(map, key) {
     const matchValue = tryFind(key, map);
@@ -34541,7 +34535,7 @@ function decodeRecordWith(b, rp, lookup) {
  * Stage 2, encode side. Mirror of `decodeRecordWith`: same field array, same
  * keys, so the two cannot disagree about what a record looks like on the wire.
  *
- * adr: an absent optional field emits no key at all, rather than an explicit null
+ * decision: omits absent optional fields — matches their non-required schema and avoids emitting nullable values
  */
 function encodeRecordInto(b, rp, acc0, record) {
     let acc = acc0;
