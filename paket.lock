@@ -11,7 +11,7 @@ NUGET
       Fable.Core (>= 5.0)
       Fable.TypedJson (>= 5.4)
       FSharp.Core (>= 6.0)
-    FSharp.Core (10.1.400)
+    FSharp.Core (10.1.401)
 
 GROUP Test
 STORAGE: NONE
@@ -27,7 +27,7 @@ NUGET
       Fable.Core (>= 5.0)
       Fable.TypedJson (>= 5.4)
       FSharp.Core (>= 6.0)
-    FSharp.Core (10.1.400)
+    FSharp.Core (10.1.401)
     Scriptorium.Ink (0.5)
       Fable.Core (>= 5.2)
       FSharp.Core (>= 10.0.101)
