@@ -38,7 +38,7 @@ NUGET
       Fable.Core (>= 5.2)
       FSharp.Core (>= 10.0.101)
       Scriptorium.Ink (>= 0.5)
-    Scriptorium.Quill (0.7)
+    Scriptorium.Quill (0.7.1)
       Fable.Core (>= 5.2)
       FSharp.Core (>= 10.0.101)
       Scriptorium.Ink (>= 0.5)
