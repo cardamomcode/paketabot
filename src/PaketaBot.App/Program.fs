@@ -71,7 +71,9 @@ let private resolveDependencies () =
         let gitOptions =
             createObj [ "cwd" ==> workspace; "timeout" ==> 30_000; "maxBuffer" ==> 1_048_576 ]
 
-        let! (stdout: string), _ = execFile "git" [| "rev-parse"; "HEAD" |] gitOptions |> Async.AwaitPromise
+        let! (stdout: string), _ =
+            execFile "git" [| "rev-parse"; "HEAD" |] gitOptions |> Async.AwaitPromise
+
         let checkoutSha = stdout.Trim()
         Checkouts.validateRevision eventSha checkoutSha |> requireValid
 
@@ -120,7 +122,8 @@ let private publishResolution token =
         Checkouts.validate repository.DefaultBranch (requiredEnvironment "GITHUB_REF") eventSha artifact.BaseSha
         |> requireValid
 
-        let! outcome = PublishService(github).Run(repository, artifact.BaseSha, artifact.Result)
+        let! outcome =
+            PublishService(github).Run(repository, artifact.BaseSha, artifact.Result)
 
         match outcome with
         | Unchanged -> invalidOp "the publisher received an unchanged resolution"

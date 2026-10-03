@@ -65,7 +65,8 @@ type PaketResolver(workspace: string, executable: string, isolatedHome: string) 
                             "maxBuffer" ==> 1_048_576
                         ]
 
-                    let! _ = execFile executable [| "update"; "--no-install" |] options |> Async.AwaitPromise
+                    let! _ =
+                        execFile executable [| "update"; "--no-install" |] options |> Async.AwaitPromise
 
                     let! current = readRepositoryFile lockPath PaketFiles.Lock PaketFiles.MaxLockBytes
 
