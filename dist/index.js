@@ -28661,6 +28661,9 @@ function round(x, sd, rm, more) {
     }
     return x;
 }
+function hasNonzeroDigit(x) {
+    return x.c.some(d => d !== 0);
+}
 /*
  * Return a string representing the value of Big x in normal or exponential notation.
  * Handles P.toExponential, P.toFixed, P.toJSON, P.toPrecision, P.toString and P.valueOf.
@@ -29179,7 +29182,7 @@ P.times = P.mul = function (y) {
  * rm? {number} Rounding mode: 0 (down), 1 (half-up), 2 (half-even) or 3 (up).
  */
 P.toExponential = function (dp, rm) {
-    var x = this, n = x.c[0];
+    var x = this, n = hasNonzeroDigit(x);
     if (dp !== UNDEFINED) {
         if (dp !== ~~dp || dp < 0 || dp > MAX_DP) {
             throw Error(INVALID_DP);
@@ -29188,7 +29191,7 @@ P.toExponential = function (dp, rm) {
         for (; x.c.length < dp;)
             x.c.push(0);
     }
-    return stringify(x, true, !!n);
+    return stringify(x, true, n);
 };
 /*
  * Return a string representing the value of this Big in normal notation rounded to dp fixed
@@ -29197,21 +29200,22 @@ P.toExponential = function (dp, rm) {
  * dp? {number} Decimal places: integer, 0 to MAX_DP inclusive.
  * rm? {number} Rounding mode: 0 (down), 1 (half-up), 2 (half-even) or 3 (up).
  *
- * (-0).toFixed(0) is '0', but (-0.1).toFixed(0) is '-0'.
- * (-0).toFixed(1) is '0.0', but (-0.01).toFixed(1) is '-0.0'.
+ * Unlike JavaScript, the sign is omitted when the rounded result is zero:
+ * (-0.1).toFixed(0) is '0' and (-0.01).toFixed(1) is '0.0', matching .NET.
  */
 P.toFixed = function (dp, rm) {
-    var x = this, n = x.c[0];
+    var x = this;
     if (dp !== UNDEFINED) {
         if (dp !== ~~dp || dp < 0 || dp > MAX_DP) {
             throw Error(INVALID_DP);
         }
-        x = round(new x.constructor(x), dp + x.e + 1, rm);
+        x = new x.constructor(x);
+        x = round(x, dp + x.e + 1, rm);
         // x.e may have changed if the value is rounded up.
         for (dp = dp + x.e + 1; x.c.length < dp;)
             x.c.push(0);
     }
-    return stringify(x, false, !!n);
+    return stringify(x, false, hasNonzeroDigit(x));
 };
 /*
  * Return a string representing the value of this Big.
@@ -29221,7 +29225,7 @@ P.toFixed = function (dp, rm) {
  */
 P.toJSON = P.toString = function () {
     var x = this, Big = x.constructor;
-    return stringify(x, x.e <= Big.NE || x.e >= Big.PE, !!x.c[0]);
+    return stringify(x, x.e <= Big.NE || x.e >= Big.PE, hasNonzeroDigit(x));
 };
 /*
  * Return the value of this Big as a primitve number.
@@ -29243,7 +29247,7 @@ P.toNumber = function () {
  * rm? {number} Rounding mode: 0 (down), 1 (half-up), 2 (half-even) or 3 (up).
  */
 P.toPrecision = function (sd, rm) {
-    var x = this, Big = x.constructor, n = x.c[0];
+    var x = this, Big = x.constructor, n = hasNonzeroDigit(x);
     if (sd !== UNDEFINED) {
         if (sd !== ~~sd || sd < 1 || sd > MAX_DP) {
             throw Error(INVALID + 'precision');
@@ -29252,7 +29256,7 @@ P.toPrecision = function (sd, rm) {
         for (; x.c.length < sd;)
             x.c.push(0);
     }
-    return stringify(x, sd <= x.e || x.e <= Big.NE || x.e >= Big.PE, !!n);
+    return stringify(x, sd <= x.e || x.e <= Big.NE || x.e >= Big.PE, n);
 };
 /*
  * Return a string representing the value of this Big.
@@ -29303,6 +29307,18 @@ function multiply(x, y) {
         return x[symbol]().multiply(y);
     }
 }
+function divide(x, y) {
+    if (typeof x === "number") {
+        return x / y;
+    }
+    else if (typeof x === "bigint") {
+        // Keep the fractional part so the caller can round it like .NET does
+        return Number(x) / y;
+    }
+    else {
+        return x[symbol]().multiply(1 / y);
+    }
+}
 function toFixed(x, dp) {
     if (typeof x === "number") {
         return x.toFixed(dp);
@@ -29325,12 +29341,37 @@ function toPrecision(x, sd) {
         return x[symbol]().toPrecision(sd);
     }
 }
+// A bigint can hold more significant digits than a double, so the mantissa is rounded on the
+// decimal digits themselves instead of going through Number
+function bigintToExponential(x, dp) {
+    const sign = x < 0n ? "-" : "";
+    let digits = (x < 0n ? -x : x).toString();
+    if (x === 0n) {
+        return sign + (dp ? "0." + "0".repeat(dp) : "0") + "e+0";
+    }
+    dp = dp ?? digits.length - 1;
+    let exponent = digits.length - 1;
+    if (digits.length > dp + 1) {
+        // .NET rounds the discarded digits away from zero
+        const roundUp = digits.charCodeAt(dp + 1) >= 53;
+        digits = (BigInt(digits.slice(0, dp + 1)) + (roundUp ? 1n : 0n)).toString();
+        if (digits.length > dp + 1) {
+            digits = digits.slice(0, dp + 1);
+            exponent += 1;
+        }
+    }
+    else {
+        digits = digits.padEnd(dp + 1, "0");
+    }
+    const mantissa = dp > 0 ? digits[0] + "." + digits.slice(1) : digits[0];
+    return sign + mantissa + "e+" + exponent;
+}
 function toExponential(x, dp) {
     if (typeof x === "number") {
         return x.toExponential(dp);
     }
     else if (typeof x === "bigint") {
-        return x;
+        return bigintToExponential(x, dp);
     }
     else {
         return x[symbol]().toExponential(dp);
@@ -30664,6 +30705,17 @@ function match(reg, input, startAt = 0) {
     return reg.exec(input);
 }
 
+// Temporal date/time values (only present under --test:js-temporal) are not JS Dates. To avoid
+// importing the side-effecting Temporal runtime modules into this core file — which would pull
+// them into every bundle — they advertise a .NET-style formatter through this well-known symbol,
+// attached to their prototype when (and only when) those modules are loaded.
+const dateTimeFormattableSymbol = Symbol.for("Fable.DateTimeFormattable");
+function isNetDateFormattable(rep) {
+    return rep != null && typeof rep[dateTimeFormattableSymbol] === "function";
+}
+function formatDateLike(rep, format) {
+    return rep instanceof Date ? toString(rep, format) : rep[dateTimeFormattableSymbol](format);
+}
 const fsFormatRegExp = /(^|[^%])%([0+\- ]*)(\*|\d+)?(?:\.(\d+))?(\w)/g;
 const formatRegExp = /\{(\d+)(,-?\d+)?(?:\:([a-zA-Z])(\d{0,2})|\:(.+?))?\}/g;
 function isLessThan(x, y) {
@@ -30791,8 +30843,8 @@ function formatReplacement(rep, flags, padLength, precision, format) {
                 break;
         }
     }
-    else if (rep instanceof Date) {
-        rep = toString(rep);
+    else if (rep instanceof Date || isNetDateFormattable(rep)) {
+        rep = formatDateLike(rep, undefined);
     }
     else if (format === "A" && typeof rep === "string") {
         rep = "\"" + rep + "\"";
@@ -30946,9 +30998,14 @@ function format(str, ...args) {
                     }
                     break;
                 case "e":
-                case "E":
-                    rep = precision != null ? toExponential(rep, precision) : toExponential(rep);
+                case "E": {
+                    precision = precision != null ? precision : 6;
+                    rep = String(toExponential(rep, precision));
+                    // .NET always signs the exponent and pads it to at least three digits
+                    const eIdx = rep.indexOf("e");
+                    rep = rep.slice(0, eIdx) + format + rep[eIdx + 1] + padLeft(rep.slice(eIdx + 2), 3, "0");
                     break;
+                }
                 case "f":
                 case "F":
                     precision = precision != null ? precision : 2;
@@ -30972,7 +31029,7 @@ function format(str, ...args) {
                         const eChar = format === "G" ? "E" : "e";
                         rep = mantissa + eChar + expSign + paddedExpDigits;
                     }
-                    else {
+                    else if (rep.indexOf(".") >= 0) {
                         rep = trimEnd(trimEnd(rep, "0"), ".");
                     }
                     break;
@@ -31023,7 +31080,21 @@ function format(str, ...args) {
                     }
                     if (pattern) {
                         let sign = "";
-                        rep = pattern.replace(/([0#,]+)(\.[0#]+)?/, (_, intPart, decimalPart) => {
+                        const patternStr = pattern;
+                        // Each `%` scales the value by 100 and is kept as a literal in the output
+                        const percents = (patternStr.match(/%/g) ?? []).length;
+                        if (percents > 0) {
+                            rep = multiply(rep, Math.pow(100, percents));
+                        }
+                        // .NET ignores commas placed after the decimal placeholders, hence the trailing group
+                        rep = patternStr.replace(/([0#,]+)(\.[0#]+)?(,*)/, (_, intPart, decimalPart) => {
+                            // Commas between the last integer placeholder and the decimal point scale the
+                            // value down by 1000 each; commas anywhere else only turn on digit grouping
+                            const scaleCommas = /,*$/.exec(intPart)[0].length;
+                            if (scaleCommas > 0) {
+                                intPart = intPart.substring(0, intPart.length - scaleCommas);
+                                rep = divide(rep, Math.pow(1000, scaleCommas));
+                            }
                             if (isLessThan(rep, 0)) {
                                 rep = multiply(rep, -1);
                                 sign = "-";
@@ -31057,8 +31128,8 @@ function format(str, ...args) {
                     }
             }
         }
-        else if (rep instanceof Date) {
-            rep = toString(rep, pattern || format);
+        else if (rep instanceof Date || isNetDateFormattable(rep)) {
+            rep = formatDateLike(rep, pattern || format);
         }
         else {
             rep = toString$2(rep);
@@ -35604,7 +35675,11 @@ function HashSet__Remove_2B595(this$, k) {
     }
     switch (matchResult) {
         case 0: {
-            getItemFromDict(this$.hashMap, matchValue[1]).splice(matchValue[2], 1);
+            const h_1 = matchValue[1] | 0;
+            getItemFromDict(this$.hashMap, h_1).splice(matchValue[2], 1);
+            if (getItemFromDict(this$.hashMap, h_1).length === 0) {
+                this$.hashMap.delete(h_1);
+            }
             return true;
         }
         default:

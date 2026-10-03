@@ -63,7 +63,9 @@ type OctokitGateway(token: string) =
     interface IGitHubGateway with
         member _.GetRepository(owner, name) =
             async {
-                let! response = call "GET /repos/{owner}/{repo}" (createObj [ "owner" ==> owner; "repo" ==> name ])
+                let! response =
+                    call "GET /repos/{owner}/{repo}" (createObj [ "owner" ==> owner; "repo" ==> name ])
+
                 let value = GitHubValues.data response
 
                 return {

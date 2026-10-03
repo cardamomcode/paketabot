@@ -1,6 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2024",
+    // decision: declares Temporal to type-check copied Fable modules without enabling Temporal at runtime
+    "lib": ["ES2024", "DOM", "ESNext.Temporal"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "rootDir": "build/ts",

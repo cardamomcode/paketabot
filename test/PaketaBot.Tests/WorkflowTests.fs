@@ -214,7 +214,9 @@ let private publishTests =
                             Messages = []
                         }
 
-                        let! outcome = PublishService(github).Run(repository, String.replicate 40 "a", unchanged)
+                        let! outcome =
+                            PublishService(github).Run(repository, String.replicate 40 "a", unchanged)
+
                         assertThat outcome (isEqualTo Unchanged)
                         assertThat github.Published.IsNone isTrue
                         assertThat github.Operations (isEqualTo [])
@@ -234,7 +236,9 @@ let private publishTests =
                             Messages = [ "resolver timed out" ]
                         }
 
-                        let! outcome = PublishService(github).Run(repository, String.replicate 40 "a", failed)
+                        let! outcome =
+                            PublishService(github).Run(repository, String.replicate 40 "a", failed)
+
                         assertThat outcome (isEqualTo (RunFailed [ "resolver timed out" ]))
                         assertThat github.Published.IsNone isTrue
                         assertThat github.Operations (isEqualTo [])
@@ -283,7 +287,9 @@ let private publishTests =
                         }
 
                         let github = GitHub(Some previous, Some previous.HeadSha, FailUpdatePullRequest)
-                        let! outcome = PublishService(github).Run(repository, String.replicate 40 "a", updatedResult)
+
+                        let! outcome =
+                            PublishService(github).Run(repository, String.replicate 40 "a", updatedResult)
 
                         match outcome with
                         | RunFailed [ message ] ->
@@ -364,7 +370,9 @@ let private publishTests =
                 fun _ ->
                     async {
                         let github = GitHub(None, None, FailCreatePullRequest)
-                        let! outcome = PublishService(github).Run(repository, String.replicate 40 "a", updatedResult)
+
+                        let! outcome =
+                            PublishService(github).Run(repository, String.replicate 40 "a", updatedResult)
 
                         match outcome with
                         | RunFailed [ message ] -> assertThat (message.Contains("recovery procedure")) isTrue
