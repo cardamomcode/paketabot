@@ -29285,7 +29285,7 @@ function isIntegral(x) {
     // Not perfect, because in JS we can't distinguish between 1.0 and 1
     return typeof x === "number" && Number.isInteger(x) || typeof x === "bigint";
 }
-function compare$2(x, y) {
+function compare$3(x, y) {
     if (typeof x === "number") {
         return x < y ? -1 : (x > y ? 1 : 0);
     }
@@ -29491,6 +29491,25 @@ function toIterator(en) {
         },
     };
 }
+class Lazy {
+    factory;
+    isValueCreated;
+    createdValue;
+    constructor(factory) {
+        this.factory = factory;
+        this.isValueCreated = false;
+    }
+    get Value() {
+        if (!this.isValueCreated) {
+            this.createdValue = this.factory();
+            this.isValueCreated = true;
+        }
+        return this.createdValue;
+    }
+    get IsValueCreated() {
+        return this.isValueCreated;
+    }
+}
 function padWithZeros(i, length) {
     return i.toString(10).padStart(length, "0");
 }
@@ -29695,7 +29714,7 @@ function compareArraysWith(x, y, comp) {
     return 0;
 }
 function compareArrays(x, y) {
-    return compareArraysWith(x, y, compare$1);
+    return compareArraysWith(x, y, compare$2);
 }
 function compareObjects(x, y) {
     const xKeys = Object.keys(x);
@@ -29711,7 +29730,7 @@ function compareObjects(x, y) {
             return key < yKeys[i] ? -1 : 1;
         }
         else {
-            j = compare$1(x[key], y[key]);
+            j = compare$2(x[key], y[key]);
             if (j !== 0) {
                 return j;
             }
@@ -29719,7 +29738,7 @@ function compareObjects(x, y) {
     }
     return 0;
 }
-function compare$1(x, y) {
+function compare$2(x, y) {
     if (x === y) {
         return 0;
     }
@@ -29902,7 +29921,7 @@ function recordCompareTo(self, other) {
     else {
         const thisNames = Object.keys(self);
         for (let i = 0; i < thisNames.length; i++) {
-            const result = compare$1(self[thisNames[i]], other[thisNames[i]]);
+            const result = compare$2(self[thisNames[i]], other[thisNames[i]]);
             if (result !== 0) {
                 return result;
             }
@@ -29994,13 +30013,27 @@ function tryParse$4(str, defValue) {
 BigInt.prototype.toJSON = function () {
     return `${this.toString()}`;
 };
+function compare$1(x, y) {
+    return x < y ? -1 : x > y ? 1 : 0;
+}
 function fromInt32(n) { return BigInt(n); }
+function fromInt64(n) { return n; }
 function fromFloat64(n) { return BigInt(Math.trunc(n)); }
 function fromString(s) { return BigInt(s); }
 function toIntN_unchecked(bits, x, signed) {
     return signed ? BigInt.asIntN(bits, x) : BigInt.asUintN(bits, x);
 }
+function toIntN(bits, x, signed) {
+    const truncated = signed ? BigInt.asIntN(bits, x) : BigInt.asUintN(bits, x);
+    if (truncated !== x) {
+        const s = "a signed" ;
+        throw new Exception(`Value was either too large or too small for ${s} ${bits}-bit integer.`);
+    }
+    return truncated;
+}
+function toInt64(x) { return toIntN(64, x, true); }
 function toInt64_unchecked(x) { return toIntN_unchecked(64, x, true); }
+function toFloat64(x) { return Number(x); }
 
 /**
  * DateTimeOffset functions.
@@ -30719,7 +30752,7 @@ function formatDateLike(rep, format) {
 const fsFormatRegExp = /(^|[^%])%([0+\- ]*)(\*|\d+)?(?:\.(\d+))?(\w)/g;
 const formatRegExp = /\{(\d+)(,-?\d+)?(?:\:([a-zA-Z])(\d{0,2})|\:(.+?))?\}/g;
 function isLessThan(x, y) {
-    return compare$2(x, y) < 0;
+    return compare$3(x, y) < 0;
 }
 const StringComparison = {
     CurrentCultureIgnoreCase: 1,
@@ -31272,7 +31305,7 @@ class Some {
             return 1;
         }
         else {
-            return compare$1(this.value, other instanceof Some ? other.value : other);
+            return compare$2(this.value, other instanceof Some ? other.value : other);
         }
     }
 }
@@ -32173,7 +32206,7 @@ class FSharpList extends Record {
                         if (matchValue_1 != null) {
                             const xt = value(matchValue);
                             const yt = value(matchValue_1);
-                            const c = compare$1(xs_1.head, ys_1.head) | 0;
+                            const c = compare$2(xs_1.head, ys_1.head) | 0;
                             if (c === 0) {
                                 xs_1_mut = xt;
                                 ys_1_mut = yt;
@@ -32838,41 +32871,6 @@ function toCanonicalPascal(name) {
     }
 }
 
-function FSharpResult$2_Ok(ResultValue) {
-    return new FSharpResult$2(0, [ResultValue]);
-}
-function FSharpResult$2_Error$(ErrorValue) {
-    return new FSharpResult$2(1, [ErrorValue]);
-}
-class FSharpResult$2 extends Union {
-    constructor(tag, fields) {
-        super();
-        this.tag = tag;
-        this.fields = fields;
-    }
-    tag;
-    fields;
-    cases() {
-        return ["Ok", "Error"];
-    }
-}
-function Result_Map(mapping, result) {
-    if (result.tag === /* Ok */ 0) {
-        return FSharpResult$2_Ok(mapping(result.fields[0]));
-    }
-    else {
-        return FSharpResult$2_Error$(result.fields[0]);
-    }
-}
-function Result_MapError(mapping, result) {
-    if (result.tag === /* Ok */ 0) {
-        return FSharpResult$2_Ok(result.fields[0]);
-    }
-    else {
-        return FSharpResult$2_Error$(mapping(result.fields[0]));
-    }
-}
-
 class MapTreeLeaf$2 {
     v;
     k;
@@ -33452,7 +33450,7 @@ class FSharpMap {
         const this$ = this;
         return ((other instanceof FSharpMap) ? ((that = other, compareWith((kvp1, kvp2) => {
             const c = this$.comparer.Compare(kvp1[0], kvp2[0]) | 0;
-            return ((c !== 0) ? c : compare$1(kvp1[1], kvp2[1])) | 0;
+            return ((c !== 0) ? c : compare$2(kvp1[1], kvp2[1])) | 0;
         }, this$, that))) : 1) | 0;
     }
     "System.Collections.Generic.ICollection`1.Add2B595"(x) {
@@ -33586,6 +33584,41 @@ function toList(table) {
 }
 function empty(comparer) {
     return FSharpMap_Empty(comparer);
+}
+
+function FSharpResult$2_Ok(ResultValue) {
+    return new FSharpResult$2(0, [ResultValue]);
+}
+function FSharpResult$2_Error$(ErrorValue) {
+    return new FSharpResult$2(1, [ErrorValue]);
+}
+class FSharpResult$2 extends Union {
+    constructor(tag, fields) {
+        super();
+        this.tag = tag;
+        this.fields = fields;
+    }
+    tag;
+    fields;
+    cases() {
+        return ["Ok", "Error"];
+    }
+}
+function Result_Map(mapping, result) {
+    if (result.tag === /* Ok */ 0) {
+        return FSharpResult$2_Ok(mapping(result.fields[0]));
+    }
+    else {
+        return FSharpResult$2_Error$(result.fields[0]);
+    }
+}
+function Result_MapError(mapping, result) {
+    if (result.tag === /* Ok */ 0) {
+        return FSharpResult$2_Ok(result.fields[0]);
+    }
+    else {
+        return FSharpResult$2_Error$(mapping(result.fields[0]));
+    }
 }
 
 function JsonValue_JString(stringValue) {
@@ -33764,12 +33797,7 @@ function describeValue(backend, fv) {
  * so the recursive group can reference it.
  */
 function mapLookup(backend, m, key) {
-    if (backend.ContainsKey(m, key)) {
-        return some(backend.Get(m, key));
-    }
-    else {
-        return undefined;
-    }
+    return backend.TryGet(m, key);
 }
 /**
  * Adapt a Map<string, string> (e.g., ToolCall.input from LLM). Each value
@@ -34042,6 +34070,9 @@ function parseInt64(s) {
         return FSharpResult$2_Error$(toText(printf("cannot parse \'%s\' as int64"))(s));
     }
 }
+/**
+ * Parse a JSON number independently of the ambient culture.
+ */
 function parseFloat$(s) {
     let matchValue;
     let outArg = 0;
@@ -34142,6 +34173,9 @@ function parseGuid(s) {
         return FSharpResult$2_Error$(toText(printf("cannot parse \'%s\' as Guid"))(s));
     }
 }
+/**
+ * Parse an exact decimal independently of the ambient culture.
+ */
 function parseDecimal(s) {
     let matchValue;
     let outArg = new Big("0");
@@ -34249,14 +34283,16 @@ class BuildCtx extends Record {
     Registry;
     KeyTransform;
     TagTransform;
+    StrictJson;
     Building;
     RefMode;
-    constructor(Backend, Registry, KeyTransform, TagTransform, Building, RefMode) {
+    constructor(Backend, Registry, KeyTransform, TagTransform, StrictJson, Building, RefMode) {
         super();
         this.Backend = Backend;
         this.Registry = Registry;
         this.KeyTransform = KeyTransform;
         this.TagTransform = TagTransform;
+        this.StrictJson = StrictJson;
         this.Building = Building;
         this.RefMode = RefMode;
     }
@@ -34294,6 +34330,151 @@ function formatNode(typeName, format) {
 const noDefs = empty({
     Compare: (x, y) => (comparePrimitives(x, y) | 0),
 });
+function isIntegralFloat(value) {
+    return value === Math.trunc(value);
+}
+function integerError(b, target, v) {
+    let arg = undefined;
+    return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to %s"))(arg)(target)));
+}
+function decodeStrictInt(b, v) {
+    if (b.IsInt(v)) {
+        const n = b.AsInt(v) | 0;
+        if ((n >= -2147483648) && (n <= 2147483647)) {
+            return FSharpResult$2_Ok(n);
+        }
+        else {
+            return integerError(b, "System.Int32", v);
+        }
+    }
+    else if (b.IsFloat(v)) {
+        const n_1 = b.AsFloat(v);
+        if ((isIntegralFloat(n_1) && (n_1 >= -2147483648)) && (n_1 <= 2147483647)) {
+            return FSharpResult$2_Ok(~~n_1);
+        }
+        else {
+            return integerError(b, "System.Int32", v);
+        }
+    }
+    else {
+        return integerError(b, "System.Int32", v);
+    }
+}
+function strictInt64Decoder(b) {
+    const lower = fromInt64(-9223372036854775808n);
+    const upper = fromInt64(9223372036854775807n);
+    return (v) => {
+        if (b.IsInt(v)) {
+            const n = b.AsInt(v) | 0;
+            if ((n >= -2147483648) && (n <= 2147483647)) {
+                return FSharpResult$2_Ok(toInt64_unchecked(fromInt32(n)));
+            }
+            else {
+                const wide = fromInt32(n);
+                return ((compare$1(wide, lower) >= 0) && (compare$1(wide, upper) <= 0)) ? FSharpResult$2_Ok(toInt64(wide)) : integerError(b, "System.Int64", v);
+            }
+        }
+        else if (b.IsFloat(v)) {
+            const n_1 = b.AsFloat(v);
+            return ((isIntegralFloat(n_1) && (n_1 >= toFloat64(-9223372036854775808n))) && (n_1 < 9.223372036854776E+18)) ? FSharpResult$2_Ok(toInt64_unchecked(fromFloat64(n_1))) : integerError(b, "System.Int64", v);
+        }
+        else {
+            return integerError(b, "System.Int64", v);
+        }
+    };
+}
+function strictInteger(b, v) {
+    if (b.IsInt(v)) {
+        return true;
+    }
+    else if (b.IsFloat(v)) {
+        return isIntegralFloat(b.AsFloat(v));
+    }
+    else {
+        return false;
+    }
+}
+function strictCodecGuard(b, schema) {
+    let expected;
+    const matchValue = tryFind("type", schema);
+    let matchResult = undefined, typeName = undefined;
+    if (matchValue != null) {
+        if (value(matchValue).tag === /* SVStr */ 0) {
+            matchResult = 0;
+            typeName = value(matchValue).fields[0];
+        }
+        else {
+            matchResult = 1;
+        }
+    }
+    else {
+        matchResult = 1;
+    }
+    switch (matchResult) {
+        case 0: {
+            expected = typeName;
+            break;
+        }
+        default:
+            expected = undefined;
+    }
+    let matchResult_1 = undefined;
+    if (expected != null) {
+        switch (value(expected)) {
+            case "string": {
+                matchResult_1 = 0;
+                break;
+            }
+            case "integer": {
+                matchResult_1 = 1;
+                break;
+            }
+            case "number": {
+                matchResult_1 = 2;
+                break;
+            }
+            case "boolean": {
+                matchResult_1 = 3;
+                break;
+            }
+            case "object": {
+                matchResult_1 = 4;
+                break;
+            }
+            case "array": {
+                matchResult_1 = 5;
+                break;
+            }
+            case "null": {
+                matchResult_1 = 6;
+                break;
+            }
+            default:
+                matchResult_1 = 7;
+        }
+    }
+    else {
+        matchResult_1 = 7;
+    }
+    switch (matchResult_1) {
+        case 0:
+            return (v) => (b.IsString(v) ? FSharpResult$2_Ok(undefined) : FSharpResult$2_Error$("expected JSON string"));
+        case 1:
+            return (v_1) => (strictInteger(b, v_1) ? FSharpResult$2_Ok(undefined) : FSharpResult$2_Error$("expected integral JSON number"));
+        case 2:
+            return (v_2) => ((b.IsInt(v_2) ? true : b.IsFloat(v_2)) ? FSharpResult$2_Ok(undefined) : FSharpResult$2_Error$("expected JSON number"));
+        case 3:
+            return (v_3) => (b.IsBool(v_3) ? FSharpResult$2_Ok(undefined) : FSharpResult$2_Error$("expected JSON boolean"));
+        case 4:
+            return (v_4) => (b.IsMap(v_4) ? FSharpResult$2_Ok(undefined) : FSharpResult$2_Error$("expected JSON object"));
+        case 5:
+            return (v_5) => (b.IsArray(v_5) ? FSharpResult$2_Ok(undefined) : FSharpResult$2_Error$("expected JSON array"));
+        case 6:
+            return (v_6) => (b.IsNull(v_6) ? FSharpResult$2_Ok(undefined) : FSharpResult$2_Error$("expected JSON null"));
+        default:
+            return (_arg) => FSharpResult$2_Ok(undefined);
+    }
+}
 function mergeDefs(maps) {
     return fold$1((acc, m) => fold((a, k, v) => add(k, v, a), acc, m), empty({
         Compare: (x, y) => (comparePrimitives(x, y) | 0),
@@ -34316,15 +34497,15 @@ function forTypeIn(ctx, t) {
     const b = ctx.Backend;
     switch (fullName$1) {
         case "System.String":
-            return planString(b);
+            return planString(b, ctx.StrictJson);
         case "System.Int32":
-            return planInt(b);
+            return planInt(b, ctx.StrictJson);
         case "System.Int64":
-            return planInt64(b);
+            return planInt64(b, ctx.StrictJson);
         case "System.Double":
-            return planFloat(b);
+            return planFloat(b, ctx.StrictJson);
         case "System.Boolean":
-            return planBool(b);
+            return planBool(b, ctx.StrictJson);
         default: {
             const matchValue = tryGetCodecEntry(fullName$1, ctx.Registry);
             if (matchValue == null) {
@@ -34339,15 +34520,15 @@ function forTypeIn(ctx, t) {
                         return planDecimal(b);
                     default:
                         if (isFSharpListType(fullName$1)) {
-                            return planSeq(ctx, getGenericInnerType(t), (v_2) => v_2, (_elementType, xs) => xs);
+                            return planSeq(ctx, getGenericInnerType(t), (v_3) => v_3, (elementType, xs) => xs);
                         }
                         else if (isArray(t)) {
-                            return planSeq(ctx, getElementType(t), ofArray$1, (_elementType_2, xs_2) => toArray(xs_2));
+                            return planSeq(ctx, getElementType(t), ofArray$1, (elementType_2, xs_2) => toArray(xs_2));
                         }
                         else if (isRecord(t)) {
                             if (contains(fullName$1, ctx.Building, {
-                                Equals: (x_1, y) => (x_1 === y),
-                                GetHashCode: (x_1) => (stringHash(x_1) | 0),
+                                Equals: (x_2, y) => (x_2 === y),
+                                GetHashCode: (x_2) => (stringHash(x_2) | 0),
                             })) {
                                 return planDeferred(ctx, t);
                             }
@@ -34357,8 +34538,8 @@ function forTypeIn(ctx, t) {
                         }
                         else if (isUnion(t)) {
                             if (contains(fullName$1, ctx.Building, {
-                                Equals: (x_2, y_1) => (x_2 === y_1),
-                                GetHashCode: (x_2) => (stringHash(x_2) | 0),
+                                Equals: (x_3, y_1) => (x_3 === y_1),
+                                GetHashCode: (x_3) => (stringHash(x_3) | 0),
                             })) {
                                 return planDeferred(ctx, t);
                             }
@@ -34368,46 +34549,60 @@ function forTypeIn(ctx, t) {
                         }
                         else {
                             const message = toText(printf("cannot decode %s"))(fullName$1);
-                            return new Plan((_arg) => leafError(message), (x_3) => x_3, JsonSchemaValue_SVDict(emptySchema), noDefs);
+                            return new Plan((_arg) => leafError(message), (x_4) => x_4, JsonSchemaValue_SVDict(emptySchema), noDefs);
                         }
                 }
             }
             else {
                 const entry = value(matchValue);
-                return new Plan((v) => {
-                    const matchValue_1 = entry.decode(toJsonValue(b, v));
-                    return (matchValue_1.tag === /* Error */ 1) ? leafError(matchValue_1.fields[0]) : FSharpResult$2_Ok(matchValue_1.fields[0]);
-                }, (v_1) => fromJsonValue(b, entry.encode(v_1)), JsonSchemaValue_SVDict(entry.schema), noDefs);
+                const decode = entry.decode;
+                const strictGuard = strictCodecGuard(b, entry.schema);
+                return new Plan(ctx.StrictJson ? ((v) => {
+                    const matchValue_1 = strictGuard(v);
+                    if (matchValue_1.tag === /* Ok */ 0) {
+                        const matchValue_2 = decode(toJsonValue(b, v));
+                        return (matchValue_2.tag === /* Error */ 1) ? leafError(matchValue_2.fields[0]) : FSharpResult$2_Ok(matchValue_2.fields[0]);
+                    }
+                    else {
+                        return leafError(matchValue_1.fields[0]);
+                    }
+                }) : ((v_1) => {
+                    const matchValue_3 = decode(toJsonValue(b, v_1));
+                    return (matchValue_3.tag === /* Error */ 1) ? leafError(matchValue_3.fields[0]) : FSharpResult$2_Ok(matchValue_3.fields[0]);
+                }), (v_2) => fromJsonValue(b, entry.encode(v_2)), JsonSchemaValue_SVDict(entry.schema), noDefs);
             }
         }
     }
 }
-function planString(b) {
-    return new Plan((v) => {
+function planString(b, strict) {
+    return new Plan(strict ? ((v) => {
         let arg = undefined;
-        return b.IsString(v) ? FSharpResult$2_Ok(b.AsString(v)) : (b.IsInt(v) ? FSharpResult$2_Ok(intToString(b.AsInt(v))) : (b.IsFloat(v) ? FSharpResult$2_Ok(floatToString(b.AsFloat(v))) : (b.IsBool(v) ? FSharpResult$2_Ok(boolToString(b.AsBool(v))) : leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.String"))(arg))))));
-    }, (x) => x, primitiveNode("string"), noDefs);
+        return b.IsString(v) ? FSharpResult$2_Ok(b.AsString(v)) : leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.String"))(arg)));
+    }) : ((v_1) => {
+        let arg_1 = undefined;
+        return b.IsString(v_1) ? FSharpResult$2_Ok(b.AsString(v_1)) : (b.IsInt(v_1) ? FSharpResult$2_Ok(intToString(b.AsInt(v_1))) : (b.IsFloat(v_1) ? FSharpResult$2_Ok(floatToString(b.AsFloat(v_1))) : (b.IsBool(v_1) ? FSharpResult$2_Ok(boolToString(b.AsBool(v_1))) : leafError((arg_1 = describeValue(b, v_1), toText(printf("cannot coerce %s to System.String"))(arg_1))))));
+    }), (x) => x, primitiveNode("string"), noDefs);
 }
-function planInt(b) {
-    return new Plan((v) => {
+function planInt(b, strict) {
+    return new Plan(strict ? ((v) => decodeStrictInt(b, v)) : ((v_1) => {
         let arg = undefined;
-        if (b.IsInt(v)) {
-            return FSharpResult$2_Ok(b.AsInt(v));
+        if (b.IsInt(v_1)) {
+            return FSharpResult$2_Ok(b.AsInt(v_1));
         }
-        else if (b.IsFloat(v)) {
-            return FSharpResult$2_Ok(~~b.AsFloat(v));
+        else if (b.IsFloat(v_1)) {
+            return FSharpResult$2_Ok(~~b.AsFloat(v_1));
         }
-        else if (b.IsString(v)) {
-            const matchValue = parseInt$(b.AsString(v));
+        else if (b.IsString(v_1)) {
+            const matchValue = parseInt$(b.AsString(v_1));
             return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
         }
         else {
-            return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Int32"))(arg)));
+            return leafError((arg = describeValue(b, v_1), toText(printf("cannot coerce %s to System.Int32"))(arg)));
         }
-    }, (x) => x, primitiveNode("integer"), noDefs);
+    }), (x) => x, primitiveNode("integer"), noDefs);
 }
-function planInt64(b) {
-    return new Plan((v) => {
+function planInt64(b, strict) {
+    return new Plan(strict ? strictInt64Decoder(b) : ((v) => {
         let arg = undefined;
         if (b.IsInt(v)) {
             return FSharpResult$2_Ok(toInt64_unchecked(fromInt32(b.AsInt(v))));
@@ -34422,40 +34617,46 @@ function planInt64(b) {
         else {
             return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Int64"))(arg)));
         }
-    }, (x) => x, primitiveNode("integer"), noDefs);
+    }), (x) => x, primitiveNode("integer"), noDefs);
 }
-function planFloat(b) {
-    return new Plan((v) => {
+function planFloat(b, strict) {
+    return new Plan(strict ? ((v) => {
         let arg = undefined;
-        if (b.IsFloat(v)) {
-            return FSharpResult$2_Ok(b.AsFloat(v));
+        return b.IsFloat(v) ? FSharpResult$2_Ok(b.AsFloat(v)) : (b.IsInt(v) ? FSharpResult$2_Ok(b.AsInt(v)) : leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Double"))(arg))));
+    }) : ((v_1) => {
+        let arg_1 = undefined;
+        if (b.IsFloat(v_1)) {
+            return FSharpResult$2_Ok(b.AsFloat(v_1));
         }
-        else if (b.IsInt(v)) {
-            return FSharpResult$2_Ok(b.AsInt(v));
+        else if (b.IsInt(v_1)) {
+            return FSharpResult$2_Ok(b.AsInt(v_1));
         }
-        else if (b.IsString(v)) {
-            const matchValue = parseFloat$(b.AsString(v));
+        else if (b.IsString(v_1)) {
+            const matchValue = parseFloat$(b.AsString(v_1));
             return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
         }
         else {
-            return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Double"))(arg)));
+            return leafError((arg_1 = describeValue(b, v_1), toText(printf("cannot coerce %s to System.Double"))(arg_1)));
         }
-    }, (x) => x, primitiveNode("number"), noDefs);
+    }), (x) => x, primitiveNode("number"), noDefs);
 }
-function planBool(b) {
-    return new Plan((v) => {
+function planBool(b, strict) {
+    return new Plan(strict ? ((v) => {
         let arg = undefined;
-        if (b.IsBool(v)) {
-            return FSharpResult$2_Ok(b.AsBool(v));
+        return b.IsBool(v) ? FSharpResult$2_Ok(b.AsBool(v)) : leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Boolean"))(arg)));
+    }) : ((v_1) => {
+        let arg_1 = undefined;
+        if (b.IsBool(v_1)) {
+            return FSharpResult$2_Ok(b.AsBool(v_1));
         }
-        else if (b.IsString(v)) {
-            const matchValue = parseBool(b.AsString(v));
+        else if (b.IsString(v_1)) {
+            const matchValue = parseBool(b.AsString(v_1));
             return (matchValue.tag === /* Error */ 1) ? leafError(matchValue.fields[0]) : FSharpResult$2_Ok(matchValue.fields[0]);
         }
         else {
-            return leafError((arg = describeValue(b, v), toText(printf("cannot coerce %s to System.Boolean"))(arg)));
+            return leafError((arg_1 = describeValue(b, v_1), toText(printf("cannot coerce %s to System.Boolean"))(arg_1)));
         }
-    }, (x_1) => x_1, primitiveNode("boolean"), noDefs);
+    }), (x_1) => x_1, primitiveNode("boolean"), noDefs);
 }
 function planDateTime(b) {
     return new Plan((v) => {
@@ -34506,45 +34707,53 @@ function planDecimal(b) {
     }, decimalToString, formatNode("string", "decimal"), noDefs);
 }
 function planSeq(ctx, elementType, extract, builder) {
+    let backend = undefined, decodeElement = undefined, build_1 = undefined, invalid = undefined, atIndex = undefined, matchValue = undefined, mapper = undefined;
     const b = ctx.Backend;
     const element = forTypeIn(ctx, elementType);
     const build = curry2(builder)(elementType);
     let expected;
     const arg = name(elementType);
     expected = toText(printf("expected JSON array for %s[]"))(arg);
-    return new Plan((v_1) => {
-        if (!b.IsArray(v_1)) {
-            return leafError(expected);
+    return new Plan((backend = b, (decodeElement = element.Decode, (build_1 = build, (invalid = (() => leafError(expected)), (atIndex = ((index, errors) => under(toText(printf("[%d]"))(index), errors)), (matchValue = backend.ArrayMapper, (matchValue == null) ? ((value_1) => {
+        if (!backend.IsArray(value_1)) {
+            return invalid();
         }
         else {
-            const len = b.ArrayLength(v_1) | 0;
+            const len = backend.ArrayLength(value_1) | 0;
             let i = 0;
             let failure = undefined;
             let acc = empty$1();
             while ((i < len) && (failure == null)) {
-                let arg_1 = undefined;
-                const matchValue = element.Decode(b.ArrayAt(v_1, i));
-                if (matchValue.tag === /* Error */ 1) {
-                    const errs = matchValue.fields[0];
-                    failure = under((arg_1 = (i | 0), toText(printf("[%d]"))(arg_1)), errs);
+                const matchValue_2 = decodeElement(backend.ArrayAt(value_1, i));
+                if (matchValue_2.tag === /* Error */ 1) {
+                    const errors_1_1 = matchValue_2.fields[0];
+                    failure = atIndex(i, errors_1_1);
                 }
                 else {
-                    const x_1 = matchValue.fields[0];
-                    acc = cons(x_1, acc);
+                    const item = matchValue_2.fields[0];
+                    acc = cons(item, acc);
                 }
                 i = ((i + 1) | 0);
             }
-            return (failure == null) ? FSharpResult$2_Ok(build(reverse(acc))) : FSharpResult$2_Error$(value(failure));
+            return (failure == null) ? FSharpResult$2_Ok(build_1(reverse(acc))) : FSharpResult$2_Error$(value(failure));
         }
-    }, (v) => {
-        const items = map(element.Encode, extract(v));
-        return b.BuildArray(items);
+    }) : ((mapper = value(matchValue), (value) => {
+        if (!backend.IsArray(value)) {
+            return invalid();
+        }
+        else {
+            const matchValue_1 = mapper.TryMapArray(value, decodeElement);
+            return (matchValue_1.tag === /* Error */ 1) ? FSharpResult$2_Error$(atIndex(matchValue_1.fields[0][0], matchValue_1.fields[0][1])) : FSharpResult$2_Ok(build_1(matchValue_1.fields[0]));
+        }
+    })))))))), (v) => {
+        const items_1 = map(element.Encode, extract(v));
+        return b.BuildArray(items_1);
     }, JsonSchemaValue_SVDict(ofList(ofArray$1([["type", JsonSchemaValue_SVStr("array")], ["items", element.Schema]]), {
         Compare: (x, y) => (comparePrimitives(x, y) | 0),
     })), element.Definitions);
 }
 function buildRecordPlan(ctx, t) {
-    const inner = new BuildCtx(ctx.Backend, ctx.Registry, ctx.KeyTransform, ctx.TagTransform, cons(fullName(t), ctx.Building), ctx.RefMode);
+    const inner = new BuildCtx(ctx.Backend, ctx.Registry, ctx.KeyTransform, ctx.TagTransform, ctx.StrictJson, cons(fullName(t), ctx.Building), ctx.RefMode);
     return new RecordPlan(map$2((fi) => {
         const isOpt = isOptionType(fullName(fi[1]));
         const innerType = isOpt ? getGenericInnerType(fi[1]) : fi[1];
@@ -34559,7 +34768,7 @@ function buildRecordPlan(ctx, t) {
  */
 function decodeRecordWith(b, rp, lookup) {
     const n = rp.Fields.length | 0;
-    const values = fill(new Array(n), 0, n, null);
+    const values = new Array(n);
     let errs = empty$1();
     for (let i = 0; i <= (n - 1); i++) {
         let raw = undefined;
@@ -34666,7 +34875,7 @@ function planRecord(ctx, t) {
     return new Plan((v) => (b.IsMap(v) ? decodeRecordWith(b, rp, (key) => mapLookup(b, v, key)) : leafError(expected)), (v_1) => encodeRecordInto(b, rp, b.NewMap(), v_1), patternInput[0], patternInput[1]);
 }
 function buildCasePlans(ctx, t) {
-    const inner = new BuildCtx(ctx.Backend, ctx.Registry, ctx.KeyTransform, ctx.TagTransform, cons(fullName(t), ctx.Building), ctx.RefMode);
+    const inner = new BuildCtx(ctx.Backend, ctx.Registry, ctx.KeyTransform, ctx.TagTransform, ctx.StrictJson, cons(fullName(t), ctx.Building), ctx.RefMode);
     return map$2((caseInfo) => {
         const caseFields = getUnionCaseFields(caseInfo);
         let payload;
@@ -34846,18 +35055,21 @@ function planUnion(ctx, t) {
 }
 function planDeferred(ctx, t) {
     let matchValue = undefined;
-    const restart = new BuildCtx(ctx.Backend, ctx.Registry, ctx.KeyTransform, ctx.TagTransform, empty$1(), ctx.RefMode);
-    return new Plan((v) => forTypeIn(restart, t).Decode(v), (v_1) => forTypeIn(restart, t).Encode(v_1), (matchValue = ctx.RefMode, (matchValue == null) ? JsonSchemaValue_SVDict(ofList(ofArray$1([["type", JsonSchemaValue_SVStr("object")], ["title", JsonSchemaValue_SVStr(name(t))]]), {
+    const restart = new BuildCtx(ctx.Backend, ctx.Registry, ctx.KeyTransform, ctx.TagTransform, ctx.StrictJson, empty$1(), ctx.RefMode);
+    let resolve;
+    const resolved = new Lazy(() => forTypeIn(restart, t));
+    resolve = (() => resolved.Value);
+    return new Plan((v) => resolve().Decode(v), (v_1) => resolve().Encode(v_1), (matchValue = ctx.RefMode, (matchValue == null) ? JsonSchemaValue_SVDict(ofList(ofArray$1([["type", JsonSchemaValue_SVStr("object")], ["title", JsonSchemaValue_SVStr(name(t))]]), {
         Compare: (x_1, y_1) => (comparePrimitives(x_1, y_1) | 0),
     })) : JsonSchemaValue_SVDict(ofList(singleton$1(["$ref", JsonSchemaValue_SVStr(value(matchValue) + fullName(t))]), {
         Compare: (x, y) => (comparePrimitives(x, y) | 0),
     }))), noDefs);
 }
 function forType(backend, registry, keyTransform, tagTransform, t) {
-    return forTypeIn(new BuildCtx(backend, registry, keyTransform, tagTransform, empty$1(), undefined), t);
+    return forTypeIn(new BuildCtx(backend, registry, keyTransform, tagTransform, false, empty$1(), undefined), t);
 }
 function forTypeFromLookup(backend, registry, keyTransform, tagTransform, t) {
-    const ctx = new BuildCtx(backend, registry, keyTransform, tagTransform, empty$1(), undefined);
+    const ctx = new BuildCtx(backend, registry, keyTransform, tagTransform, false, empty$1(), undefined);
     const fullName$1 = fullName(t);
     const keyless = () => {
         let arg = undefined;
@@ -34991,21 +35203,32 @@ function resolveKey(aliases, caseRules, fieldName) {
         return value(matchValue);
     }
 }
-function buildCodec(backend, registry, typ) {
+function buildCodecWithMode(strictJson, backend, registry, typ) {
     const build = (aliases, caseRules) => {
         const defaultKeyTransform = (fieldName) => resolveKey(aliases, caseRules, fieldName);
         const defaultTagTransform = (name) => applyCaseRule(caseRules, name);
         const defaultPlan = forType(backend, registry, defaultKeyTransform, defaultTagTransform, typ);
         const defaultLookupDecode = forTypeFromLookup(backend, registry, defaultKeyTransform, defaultTagTransform, typ);
-        const decodeWith = (rules, map_1) => Result_Map((value_1) => value_1, ((rules === caseRules) ? defaultPlan : forType(backend, registry, (fieldName_1) => resolveKey(aliases, rules, fieldName_1), (name_1) => applyCaseRule(rules, name_1), typ)).Decode(map_1));
-        const encodeWith = (rules_1, record) => Encode_toJson(backend, ((rules_1 === caseRules) ? defaultPlan : forType(backend, registry, (fieldName_2) => resolveKey(aliases, rules_1, fieldName_2), (name_2) => applyCaseRule(rules_1, name_2), typ)).Encode(record));
+        const decodeWith = (rules, map_1) => Result_Map((value_1) => value_1, ((rules === caseRules) ? defaultPlan : (forType(backend, registry, (fieldName_2) => resolveKey(aliases, rules, fieldName_2), (name_2) => applyCaseRule(rules, name_2), typ))).Decode(map_1));
+        const encodeWith = (rules_1, record) => Encode_toJson(backend, ((rules_1 === caseRules) ? defaultPlan : (forType(backend, registry, (fieldName_4) => resolveKey(aliases, rules_1, fieldName_4), (name_4) => applyCaseRule(rules_1, name_4), typ))).Encode(record));
         return new TypedJson$1(curry2(decodeWith)(caseRules), curry2(encodeWith)(caseRules), decodeWith, encodeWith, (map) => Result_Map((value) => value, defaultLookupDecode(stringMapSource(backend, map))), caseRules, aliases, (newRules) => build(aliases, newRules), (newAliases) => build(newAliases, caseRules));
     };
     return build(empty({
         Compare: (x, y) => (comparePrimitives(x, y) | 0),
     }), 1);
 }
+function buildCodec(backend, registry, typ) {
+    return buildCodecWithMode(false, backend, registry, typ);
+}
 
+function isInt32Number(v) {
+    if ((Number.isInteger(v)) && (v >= -2147483648)) {
+        return v <= 2147483647;
+    }
+    else {
+        return false;
+    }
+}
 class JSBackendImpl {
     constructor() {
     }
@@ -35017,6 +35240,9 @@ class JSBackendImpl {
     }
     Get(map, key) {
         return map[key];
+    }
+    TryGet(map, key) {
+        return (key in map) ? some(map[key]) : undefined;
     }
     Put(map, key, value) {
         return (map[key] = value, map);
@@ -35031,10 +35257,10 @@ class JSBackendImpl {
         return (typeof value) === "string";
     }
     IsInt(value) {
-        return ((typeof value) === "number") && (Number.isInteger(value));
+        return ((typeof value) === "number") && isInt32Number(value);
     }
     IsFloat(value) {
-        return ((typeof value) === "number") && !(Number.isInteger(value));
+        return ((typeof value) === "number") && !isInt32Number(value);
     }
     IsBool(value) {
         return (typeof value) === "boolean";
@@ -35065,6 +35291,9 @@ class JSBackendImpl {
     }
     ArrayAt(arr, i) {
         return arr[i];
+    }
+    get ArrayMapper() {
+        return undefined;
     }
     BuildArray(items) {
         return toArray(items);
