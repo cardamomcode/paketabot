@@ -25,7 +25,7 @@
     "@rollup/plugin-commonjs": "29.0.3",
     "@rollup/plugin-node-resolve": "16.0.3",
     "@types/node": "26.6.5",
-    "rollup": "4.64.5",
+    "rollup": "4.64.10",
     "typescript": "7.0.2"
   }
 }
