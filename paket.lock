@@ -2,7 +2,7 @@ STORAGE: NONE
 RESTRICTION: == net10.0
 NUGET
   remote: https://api.nuget.org/v3/index.json
-    Fable.Core (5.6)
+    Fable.Core (5.6.1)
       FSharp.Core (>= 4.7.2)
     Fable.TypedJson (5.5)
       Fable.Core (>= 5.0)
@@ -18,7 +18,7 @@ STORAGE: NONE
 RESTRICTION: == net10.0
 NUGET
   remote: https://api.nuget.org/v3/index.json
-    Fable.Core (5.6)
+    Fable.Core (5.6.1)
       FSharp.Core (>= 4.7.2)
     Fable.TypedJson (5.5)
       Fable.Core (>= 5.0)
